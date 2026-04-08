@@ -4,6 +4,7 @@
 services:
   # Exposed server that's handling incoming web requests
   ohif_viewer:
+    pull_policy: never
     build:
       # Project root
       context: ./Viewers/
@@ -16,7 +17,7 @@ services:
       - ./Viewers/platform/app/.recipes/Nginx-Orthanc/config/nginx.conf:/etc/nginx/nginx.conf
       - ./Viewers/platform/app/.recipes/Nginx-Orthanc/config/.htpasswd:/etc/nginx/.htpasswd
       # Logs
-      - ./Viewers/platform/app/.recipes/Nginx-Orthanc/logs/nginx:/var/logs/nginx
+      - ${PERSIST_ROOT:-/mnt/checkpoints/ohif-ai}/ohif/nginx-logs:/var/logs/nginx
     ports:
       - '1025:1025' # SSL
       - '1026:1026' # Web
@@ -36,13 +37,14 @@ services:
       # Config
       - ./Viewers/platform/app/.recipes/Nginx-Orthanc/config/orthanc.json:/etc/orthanc/orthanc.json:ro
       # Persist data
-      - ./Viewers/platform/app/.recipes/Nginx-Orthanc/volumes/orthanc-db/:/var/lib/orthanc/db/
+      - ${PERSIST_ROOT:-/mnt/checkpoints/ohif-ai}/orthanc/db:/var/lib/orthanc/db/
     restart: unless-stopped
     ports:
-      - '4242:4242' # Orthanc REST API
-      - '8042:8042' # Orthanc HTTP
+      - '5242:4242' # Orthanc REST API (host:container)
+      - '9042:8042' # Orthanc HTTP (host:container)
   
   monai_sam2:
+    pull_policy: never
     build:
       # Project root
       context: ./
@@ -53,11 +55,22 @@ services:
     container_name: monai_sam2
     volumes:
        # Persist data
-      - ./monai-label/predictions:/code/predictions
+      - ${PERSIST_ROOT:-/mnt/checkpoints/ohif-ai}/monai/predictions:/code/predictions
+      - ${PERSIST_ROOT:-/mnt/checkpoints/ohif-ai}/monai/checkpoints:/code/checkpoints
+      - ${PERSIST_ROOT:-/mnt/checkpoints/ohif-ai}/monai/cache:/root/.cache
+      - ${PERSIST_ROOT:-/mnt/checkpoints/ohif-ai}/monai/apps:/code/apps
+      - ./monai-label/monailabel/tasks/infer/basic_infer.py:/code/monailabel/tasks/infer/basic_infer.py:ro
     environment:
       - CUDA_VISIBLE_DEVICES=0
       - NVIDIA_VISIBLE_DEVICES=all  # This exposes all GPUs to the container
       - NVIDIA_DRIVER_CAPABILITIES=all
+      - HF_HOME=/root/.cache/huggingface
+      - TRANSFORMERS_CACHE=/root/.cache/huggingface/transformers
+      - ENABLE_MEDGEMMA=0
+      - ENABLE_VOXTELL=0
+      - WEIGHTS_DIR=/code/checkpoints
+      - SAM2_WEIGHTS_URL=https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt
+      - MEDSAM2_WEIGHTS_URL=https://huggingface.co/wanglab/MedSAM2/resolve/main/MedSAM2_latest.pt
     #  - NVIDIA_DRIVER_CAPABILITIES=compute,utility  # Required driver capabilities for GPU use
     deploy:
       resources:
@@ -69,6 +82,14 @@ services:
     shm_size: '10gb' #runtime: nvidia  # Use NVIDIA runtime
     ports:
       - '8002:8002' 
+    command: >-
+      bash -lc "
+      [ -d /code/apps/radiology ] || python -m monailabel.main apps --download --name radiology --output /code/apps;
+      mkdir -p $${WEIGHTS_DIR};
+      [ -f $${WEIGHTS_DIR}/sam2.1_hiera_tiny.pt ] || wget -nv -O $${WEIGHTS_DIR}/sam2.1_hiera_tiny.pt $${SAM2_WEIGHTS_URL};
+      [ -f $${WEIGHTS_DIR}/MedSAM2_latest.pt ] || wget -nv -O $${WEIGHTS_DIR}/MedSAM2_latest.pt $${MEDSAM2_WEIGHTS_URL};
+      python -m monailabel.main start_server --app /code/apps/radiology --studies http://orthanc:8042/dicom-web --conf models segmentation --conf use_pretrained_model false -p 8002
+      "
     depends_on:
       - ohif_viewer
       - orthanc

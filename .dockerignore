@@ -1,0 +1,22 @@
+# Ignore everything by default
+**
+
+# Allow only sources required by monai-label Dockerfile
+!monai-label/**
+!sam2/**
+!sam3/**
+
+# Common excludes inside allowed trees
+**/.git
+**/.github
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.DS_Store
+**/.idea/
+**/.vscode/
+**/node_modules/

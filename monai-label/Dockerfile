@@ -26,11 +26,12 @@ RUN mkdir -p /code/assets
 COPY ./sam3/assets/bpe_simple_vocab_16e6.txt.gz /code/assets/
 #ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH":/usr/lib/x86_64-linux-gnu:"
 ENV LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"/usr/local/nvidia/lib64"
+ENV PIP_NO_CACHE_DIR=1
 
-RUN pip install --upgrade pip setuptools wheel
-RUN pip install -e /install/.
-RUN pip install -e /install-3/.
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel \
+	&& pip install -e /install/. \
+	&& pip install -e /install-3/. \
+	&& pip install -r requirements.txt
 #RUN pip install emoji ddd-dataset
 #RUN pip install "git+https://github.com/lvis-dataset/lvis-api.git"
 
@@ -41,15 +42,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY ./monai-label/. ./
 
 ENV WEIGHTS_DIR="/code/checkpoints/"
-# SAM2 weights
-#ENV WEIGHTS_URL="https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.pt"
-# SAM2.1 weights
-ENV WEIGHTS_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_tiny.pt"
-RUN wget --directory-prefix ${WEIGHTS_DIR} ${WEIGHTS_URL}
-
-# MEDSAM2 (Jun Ma) weights
-ENV MEDSAM2_WEIGHTS_URL="https://huggingface.co/wanglab/MedSAM2/resolve/main/MedSAM2_latest.pt"
-RUN wget --directory-prefix ${WEIGHTS_DIR} ${MEDSAM2_WEIGHTS_URL}
 
 #ENV GD_URL="https://download.openmmlab.com/mmdetection/v3.0/mm_grounding_dino/grounding_dino_swin-t_pretrain_obj365_goldg_grit9m_v3det/grounding_dino_swin-t_pretrain_obj365_goldg_grit9m_v3det_20231204_095047-b448804b.pth"
 
@@ -63,6 +55,5 @@ ENV CUDA_VISIBLE_DEVICES=1
 ENV PATH=$PATH":/code/monailabel/scripts"
 
 ENV PYTHONPATH=/code:$PYTHONPATH
-RUN python -m monailabel.main apps --download --name radiology --output /code/apps
 EXPOSE 8002
 CMD ["python", "-m", "monailabel.main", "start_server", "--app", "/code/apps/radiology", "--studies", "http://orthanc:8042/dicom-web", "--conf", "models", "segmentation", "--conf", "use_pretrained_model", "false", "-p", "8002"]
