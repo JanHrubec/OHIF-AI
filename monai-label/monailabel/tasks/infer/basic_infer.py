@@ -24,6 +24,8 @@ from glob import glob as glob
 import SimpleITK as sitk
 import numpy as np
 import nibabel as nib
+from scipy import ndimage
+from skimage.filters import threshold_otsu
 
 import torch
 from monai.data import decollate_batch
@@ -93,15 +95,18 @@ download_path = snapshot_download(
 )
 
 VOX_MODEL_NAME = "voxtell_v1.1" # Updated models may be available in the future
+ENABLE_VOXTELL = os.getenv("ENABLE_VOXTELL", "0").strip().lower() in ("1", "true", "yes", "on")
+vox_predictor = None
 
-vox_download_path = snapshot_download(
-      repo_id="mrokuss/VoxTell",
-      allow_patterns=[f"{VOX_MODEL_NAME}/*", "*.json"],
-      local_dir=DOWNLOAD_DIR
-)
-vox_model_path = os.path.join(DOWNLOAD_DIR, VOX_MODEL_NAME)
-from voxtell.inference.predictor import VoxTellPredictor
-vox_predictor = VoxTellPredictor(model_dir=vox_model_path, device=torch.device("cuda:0"))
+if ENABLE_VOXTELL:
+    vox_download_path = snapshot_download(
+        repo_id="mrokuss/VoxTell",
+        allow_patterns=[f"{VOX_MODEL_NAME}/*", "*.json"],
+        local_dir=DOWNLOAD_DIR
+    )
+    vox_model_path = os.path.join(DOWNLOAD_DIR, VOX_MODEL_NAME)
+    from voxtell.inference.predictor import VoxTellPredictor
+    vox_predictor = VoxTellPredictor(model_dir=vox_model_path, device=torch.device("cuda:0"))
 
 from nnInteractive.inference.inference_session import nnInteractiveInferenceSession
 
@@ -150,8 +155,16 @@ gem_model_kwargs = dict(
     offload_buffers=True,
 )
 
-gem_processor = transformers.AutoProcessor.from_pretrained(gem_model_id, use_fast=True,  **gem_model_kwargs)
-gem_model = transformers.AutoModelForImageTextToText.from_pretrained(gem_model_id, **gem_model_kwargs)
+ENABLE_MEDGEMMA = os.getenv("ENABLE_MEDGEMMA", "0").strip().lower() in ("1", "true", "yes", "on")
+gem_processor = None
+gem_model = None
+
+if ENABLE_MEDGEMMA:
+    try:
+        gem_processor = transformers.AutoProcessor.from_pretrained(gem_model_id, use_fast=True,  **gem_model_kwargs)
+        gem_model = transformers.AutoModelForImageTextToText.from_pretrained(gem_model_id, **gem_model_kwargs)
+    except Exception as e:
+        print(f"Warning: MedGemma initialization failed ({e}); medGemma mode will be disabled")
 
 logger = logging.getLogger(__name__)
 
@@ -510,6 +523,73 @@ class BasicInferTask(InferTask):
         reader.SetFileNames(dicom_filenames)
         #reader.SetOutputPixelType(SimpleITK.sitkUInt16) 
         img = reader.Execute()
+
+        if data.get("baseline", False):
+            start = time.time()
+
+            clip_quantile = float(data.get("baseline_clip_quantile", 0.98))
+            sigma = float(data.get("baseline_sigma", 1.0))
+
+            img_np = sitk.GetArrayFromImage(img).astype(np.float32)
+
+            upper = np.quantile(img_np, clip_quantile)
+            normed = np.clip(img_np, img_np.min(), upper).astype(np.float32)
+
+            global_median = np.median(normed)
+            global_iqr = np.subtract(*np.percentile(normed, [75, 25]))
+            if global_iqr == 0:
+                global_iqr = 1.0
+
+            for z in range(normed.shape[0]):
+                sl = normed[z]
+                sl_median = np.median(sl)
+                sl_iqr = np.subtract(*np.percentile(sl, [75, 25]))
+                if sl_iqr == 0:
+                    sl_iqr = 1.0
+                normed[z] = (sl - sl_median) * (global_iqr / sl_iqr) + global_median
+
+            vmin, vmax = normed.min(), normed.max()
+            if vmax > vmin:
+                normed = (normed - vmin) / (vmax - vmin)
+            else:
+                normed = np.zeros_like(normed, dtype=np.float32)
+
+            smoothed = ndimage.gaussian_filter(normed, sigma=sigma)
+            thresh = threshold_otsu(smoothed)
+            dark_mask = smoothed < thresh
+
+            struct = ndimage.generate_binary_structure(3, 3)
+            labelled, n_components = ndimage.label(dark_mask, structure=struct)
+
+            output = np.ones(normed.shape, dtype=np.uint8)
+            if n_components > 0:
+                component_sizes = ndimage.sum(dark_mask, labelled, range(1, n_components + 1))
+                bg_label = np.argmax(component_sizes) + 1
+                output[labelled == bg_label] = 0
+                porosity_mask = dark_mask & (labelled != bg_label)
+                output[porosity_mask] = 2
+
+            pred = (output == 2).astype(np.uint8)
+            elapsed = time.time() - start
+
+            final_result_json["prompt_info"] = {
+                "method": "baseline_thresholding",
+                "baseline_sigma": sigma,
+                "baseline_clip_quantile": clip_quantile,
+            }
+            final_result_json["sam_elapsed"] = elapsed
+
+            if instanceNumber > instanceNumber2:
+                final_result_json["flipped"] = True
+            else:
+                final_result_json["flipped"] = False
+
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            final_result_json["label_name"] = f"baseline_pred_{timestamp}"
+
+            logger.info(f"Baseline latency : {elapsed} (sec)")
+            logger.info(f"Result json info: {final_result_json}")
+            return pred, final_result_json
         
 
         before_nnInter = time.time()
@@ -540,6 +620,9 @@ class BasicInferTask(InferTask):
             logger.info(f"interactions in _session_used_interactions: {self._session_used_interactions}")
 
             if nnInter == "medGemma":
+                if gem_processor is None or gem_model is None:
+                    logger.warning("medGemma requested but MedGemma model is disabled/unavailable")
+                    return "MedGemma is disabled or unavailable on this server.", final_result_json
                 if len(data['texts'])==1 and data['texts'][0]!='' and data['texts'][0]!={}:
                     query = data['texts'][0]
                     # Convert image to RGB slices and MAX slice = 85
@@ -659,6 +742,9 @@ class BasicInferTask(InferTask):
                     return medgemma_response, final_result_json
 
             if len(data['texts'])==1 and data['texts'][0]!='' and data['texts'][0]!={}:
+                if vox_predictor is None:
+                    logger.warning("Text-prompt segmentation requested but VoxTell is disabled/unavailable")
+                    return "VoxTell text-prompt model is disabled on this server.", final_result_json
                 orig_orient = sitk.DICOMOrientImageFilter_GetOrientationFromDirectionCosines(
                     img.GetDirection()
                 )

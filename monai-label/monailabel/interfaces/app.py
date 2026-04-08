@@ -62,6 +62,10 @@ from monailabel.utils.sessions import Sessions
 logger = logging.getLogger(__name__)
 
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
 class MONAILabelApp:
     """
     Default Pre-trained Path for downloading models
@@ -217,6 +221,11 @@ class MONAILabelApp:
             "name": self.name,
             "description": self.description,
             "version": self.version,
+            # Frontend reads these flags from /monai/info
+            "capabilities": {
+                "voxtell": _env_flag("ENABLE_VOXTELL", "0"),
+                "medgemma": _env_flag("ENABLE_MEDGEMMA", "0"),
+            },
         #    "labels": self.labels,
         #    "models": {k: v.info() for k, v in self._infers.items() if v.is_valid()},
             "trainers": {k: v.info() for k, v in self._trainers.items()},
