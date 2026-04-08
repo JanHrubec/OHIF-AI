@@ -148,6 +148,9 @@ function modeFactory({ modeConfiguration }) {
       ]);
 
       toolbarService.createButtonSection('aiToolBox', ['aiToolBoxContainer']);
+      toolbarService.createButtonSection('porosityToolbox', ['porosityToolBoxContainer']);
+      toolbarService.createButtonSection('textPromptSegmentationToolbox', ['textPromptSegmentationContainer']);
+      toolbarService.createButtonSection('testMedgemmaToolbox', ['testMedgemmaContainer']);
 
       toolbarService.createButtonSection('aiToolBoxSection', [
         'Probe2',
@@ -155,28 +158,19 @@ function modeFactory({ modeConfiguration }) {
         'PlanarFreehandROI3',
         'RectangleROI2',
         //'sam2',
+      ]);
+
+      // Porosity workflow actions and controls.
+      toolbarService.createButtonSection('porosityToolBoxSection', [
         'nninter',
-        //'resetNninter',
-        //'jumpToSegment',
-        //'toggleCurrentSegment',
+        'baselineSegmentation',
+        'propagateCurrentMask',
       ]);
 
-      toolbarService.createButtonSection('textPromptSegmentationToolbox', [
-        'textPromptSegmentationContainer',
-      ]);
+      // Visibility is controlled in the panel module using backend /monai/info capabilities.
+      toolbarService.createButtonSection('textPromptSegmentationSection', ['textPromptSegmentation']);
+      toolbarService.createButtonSection('testMedgemmaSection', ['testMedgemma']);
 
-
-      toolbarService.createButtonSection('testMedgemmaToolbox', [
-        'testMedgemmaContainer',
-      ]);
-
-      toolbarService.createButtonSection('testMedgemmaSection', [
-        'testMedgemma',
-      ]);
-
-      toolbarService.createButtonSection('textPromptSegmentationSection', [
-        'textPromptSegmentation',
-      ]);
       toolbarService.createButtonSection('segmentationToolboxUtilitySection', [
         //'LabelmapSlicePropagation',
         'InterpolateLabelmap',

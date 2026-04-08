@@ -55,6 +55,14 @@ const toolbarButtons: Button[] = [
     },
   },
   {
+    id: 'porosityToolBoxContainer',
+    uiType: 'ohif.toolBoxButton',
+    props: {
+      groupId: 'porosityToolBoxContainer',
+      buttonSection: 'porosityToolBoxSection',
+    },
+  },
+  {
     id: 'textPromptSegmentationContainer',
     uiType: 'ohif.toolBoxButton',
     props: {
@@ -612,6 +620,28 @@ const toolbarButtons: Button[] = [
       label: 'run segmentation',
       tooltip: 'run',
       commands: 'runAiSegmentation',
+    },
+  },
+  {
+    id: 'baselineSegmentation',
+    uiType: 'ohif.toolBoxButton',
+    props: {
+      type: 'tool',
+      icon: 'icon-tool-threshold',
+      label: 'Baseline Mask',
+      tooltip: 'Create baseline porosity mask',
+      commands: 'runBaselineSegmentation',
+    },
+  },
+  {
+    id: 'propagateCurrentMask',
+    uiType: 'ohif.toolBoxButton',
+    props: {
+      type: 'tool',
+      icon: 'icon-labelmap-slice-propagation',
+      label: 'Propagate Mask',
+      tooltip: 'Use current segment as SAM prompts and propagate',
+      commands: 'propagateCurrentMask',
     },
   },
   {

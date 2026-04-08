@@ -27,11 +27,12 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
 
   const { toolbarService, customizationService } = servicesManager.services;
   const isAIToolBox = buttonSectionId === 'aiToolBox';
+  const isPorosityToolbox = buttonSectionId === 'porosityToolbox';
   const isTextPromptToolbox = buttonSectionId === 'textPromptSegmentationToolbox';
   const isTestMedgemmaToolbox = buttonSectionId === 'testMedgemmaToolbox';
   const [showConfig, setShowConfig] = useState(false);
   const [isLocked, setIsLocked] = useState(toolboxState.getLocked());
-  const hotkeysDisabled = isAIToolBox && isLocked;
+  const hotkeysDisabled = (isAIToolBox || isPorosityToolbox) && isLocked;
 
   // Local state for UI updates
   const [liveMode, setLiveMode] = useState(toolboxState.getLiveMode());
@@ -39,6 +40,8 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
   const [refineNew, setRefineNew] = useState(toolboxState.getRefineNew());
   const [textPromptReplaceNew, setTextPromptReplaceNew] = useState(toolboxState.getTextPromptReplaceNew());
   const [selectedModel, setSelectedModel] = useState<'nnInteractive' | 'sam2' | 'medsam2' | 'sam3'>(toolboxState.getSelectedModel());
+  const [baselineSigma, setBaselineSigma] = useState<number>(toolboxState.getBaselineSigma());
+  const [baselineClipQuantile, setBaselineClipQuantile] = useState<number>(toolboxState.getBaselineClipQuantile());
   const [medgemmaResult, setMedgemmaResult] = useState(toolboxState.getMedgemmaResult());
   const [medgemmaInstruction, setMedgemmaInstruction] = useState(toolboxState.getMedgemmaInstruction());
   const [medgemmaQuery, setMedgemmaQuery] = useState(toolboxState.getMedgemmaQuery());
@@ -72,6 +75,8 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
       setRefineNew(toolboxState.getRefineNew());
       setTextPromptReplaceNew(toolboxState.getTextPromptReplaceNew());
       setSelectedModel(toolboxState.getSelectedModel());
+      setBaselineSigma(toolboxState.getBaselineSigma());
+      setBaselineClipQuantile(toolboxState.getBaselineClipQuantile());
       setIsLocked(toolboxState.getLocked());
     };
 
@@ -288,7 +293,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
 
   // Define the interaction handler once.
   const handleInteraction = ({ itemId }: { itemId: string }) => {
-    if (isAIToolBox && isLocked && itemId !== 'Pan') {
+    if ((isAIToolBox || isPorosityToolbox) && isLocked && itemId !== 'Pan') {
       // Prevent tool changes when locked; keep Pan active
       commandsManager?.run?.('setToolActive', { toolName: 'Pan' });
       return;
@@ -297,10 +302,10 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
   };
 
   const CustomConfigComponent = customizationService.getCustomization(`${buttonSectionId}.config`);
-  const shouldCollapse = isAIToolBox && isLocked;
+  const shouldCollapse = (isAIToolBox || isPorosityToolbox) && isLocked;
 
   return (
-    <PanelSection key={isAIToolBox ? `toolbox-${isLocked}` : buttonSectionId} defaultOpen={defaultOpen && !shouldCollapse}>
+    <PanelSection key={(isAIToolBox || isPorosityToolbox) ? `toolbox-${buttonSectionId}-${isLocked}` : buttonSectionId} defaultOpen={defaultOpen && !shouldCollapse}>
       <PanelSection.Header 
         className="flex items-center justify-between"
       >
@@ -308,7 +313,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
           "pointer-events-none": shouldCollapse 
         })}>
           <span className="pointer-events-auto">{t(title)}</span>
-          {isAIToolBox && (
+          {(isAIToolBox || isPorosityToolbox) && (
             <button
               type="button"
               className={classnames('ml-auto h-5 w-5 text-primary hover:opacity-80 pointer-events-auto cursor-pointer')}
@@ -388,6 +393,10 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                       }}
                      />
                    </div>
+                 </div>
+                )}
+              {isPorosityToolbox && (
+                <div className="flex justify-center items-center gap-4 py-2 px-1">
                    <div className="flex items-center gap-2">
                      <Label htmlFor="model-selection">Model</Label>
                      <Select
@@ -409,6 +418,46 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                          <SelectItem value="sam3">SAM3</SelectItem>
                        </SelectContent>
                      </Select>
+                   </div>
+                   <div className="flex items-center gap-2">
+                     <Label htmlFor="baseline-sigma">Baseline Sigma</Label>
+                     <Input
+                       id="baseline-sigma"
+                       className="w-[90px]"
+                       type="number"
+                       min={0}
+                       max={10}
+                       step={0.1}
+                       value={baselineSigma}
+                       onChange={(e) => {
+                         const next = Number(e.target.value);
+                         if (!Number.isFinite(next)) {
+                           return;
+                         }
+                         setBaselineSigma(next);
+                         toolboxState.setBaselineSigma(next);
+                       }}
+                     />
+                   </div>
+                   <div className="flex items-center gap-2">
+                     <Label htmlFor="baseline-clip">Baseline Clip</Label>
+                     <Input
+                       id="baseline-clip"
+                       className="w-[90px]"
+                       type="number"
+                       min={0.5}
+                       max={1}
+                       step={0.01}
+                       value={baselineClipQuantile}
+                       onChange={(e) => {
+                         const next = Number(e.target.value);
+                         if (!Number.isFinite(next)) {
+                           return;
+                         }
+                         setBaselineClipQuantile(next);
+                         toolboxState.setBaselineClipQuantile(next);
+                       }}
+                     />
                    </div>
                  </div>
                 )}

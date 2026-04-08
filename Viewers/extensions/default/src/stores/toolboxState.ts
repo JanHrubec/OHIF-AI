@@ -4,9 +4,11 @@ let liveMode = true;
 let posNeg = false;
 let refineNew = false;
 let textPromptReplaceNew = false; // Replace/New toggle for Text Prompt Segmentation
-let selectedModel: 'nnInteractive' | 'sam2' | 'medsam2' | 'sam3' = 'nnInteractive'; // Model selection: nnInteractive, SAM2, MedSAM2, or SAM3
+let selectedModel: 'nnInteractive' | 'sam2' | 'medsam2' | 'sam3' = 'medsam2'; // Default to MedSAM2
 let locked = false;
 let currentActiveSegment = 1;
+let baselineSigma = 1.0;
+let baselineClipQuantile = 0.98;
 let medgemmaResult: string | null = null;
 let medgemmaInstruction: string = '';
 let medgemmaQuery: string = '';
@@ -59,6 +61,14 @@ export const toolboxState = {
   getCurrentActiveSegment: () => currentActiveSegment,
   setCurrentActiveSegment: (segment: number) => {
     currentActiveSegment = segment;
+  },
+  getBaselineSigma: () => baselineSigma,
+  setBaselineSigma: (value: number) => {
+    baselineSigma = value;
+  },
+  getBaselineClipQuantile: () => baselineClipQuantile,
+  setBaselineClipQuantile: (value: number) => {
+    baselineClipQuantile = value;
   },
   getMedgemmaResult: () => medgemmaResult,
   setMedgemmaResult: (result: string | null) => {

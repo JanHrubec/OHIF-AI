@@ -303,6 +303,156 @@ const commandsModule = ({
       return commandsManager.run('nninter');
     },
 
+    runBaselineSegmentation: () => {
+      if (toolboxState.getLocked()) {
+        return;
+      }
+
+      return commandsManager.run('sam2', {
+        baseline: true,
+        baselineSigma: toolboxState.getBaselineSigma(),
+        baselineClipQuantile: toolboxState.getBaselineClipQuantile(),
+      });
+    },
+
+    propagateCurrentMask: async () => {
+      if (toolboxState.getLocked()) {
+        return;
+      }
+
+      const { activeViewportId, viewports } = viewportGridService.getState();
+      const activeViewportSpecificData = viewports.get(activeViewportId);
+      if (!activeViewportSpecificData) {
+        return;
+      }
+
+      const { displaySetInstanceUIDs } = activeViewportSpecificData;
+      const displaySets = displaySetService.activeDisplaySets;
+      const displaySetInstanceUID = displaySetInstanceUIDs[0];
+      const currentDisplaySets = displaySets.filter(e => {
+        return e.displaySetInstanceUID == displaySetInstanceUID;
+      })[0];
+
+      if (!currentDisplaySets) {
+        return;
+      }
+
+      const activeSegment = servicesManager.services.segmentationService.getActiveSegment(activeViewportId);
+      const activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId);
+
+      if (!activeSegment || !activeSegmentation) {
+        uiNotificationService.show({
+          title: 'Propagate Mask',
+          message: 'Select an active segment first.',
+          type: 'warning',
+          duration: 4000,
+        });
+        return;
+      }
+
+      const currentImageIdIndex = servicesManager.services.cornerstoneViewportService
+        .getCornerstoneViewport(activeViewportId)
+        .getCurrentImageIdIndex();
+
+      const segImageIds = activeSegmentation?.representationData?.Labelmap?.imageIds || [];
+      const segSliceImage = segImageIds[currentImageIdIndex]
+        ? cache.getImage(segImageIds[currentImageIdIndex])
+        : null;
+
+      if (!segSliceImage) {
+        uiNotificationService.show({
+          title: 'Propagate Mask',
+          message: 'No mask available on current slice.',
+          type: 'warning',
+          duration: 4000,
+        });
+        return;
+      }
+
+      const sourceImage = currentDisplaySets.imageIds[currentImageIdIndex]
+        ? cache.getImage(currentDisplaySets.imageIds[currentImageIdIndex])
+        : null;
+
+      const voxelManager = segSliceImage.voxelManager as csTypes.IVoxelManager<number>;
+      const scalarData = voxelManager.getScalarData();
+
+      if (!scalarData?.length) {
+        uiNotificationService.show({
+          title: 'Propagate Mask',
+          message: 'Could not read current mask.',
+          type: 'warning',
+          duration: 4000,
+        });
+        return;
+      }
+
+      const rows = (sourceImage as any)?.rows || (segSliceImage as any)?.rows;
+      const cols = (sourceImage as any)?.columns || (segSliceImage as any)?.columns;
+      const width = cols || Math.round(Math.sqrt(scalarData.length));
+
+      const positivePixels: number[] = [];
+      for (let i = 0; i < scalarData.length; i++) {
+        if (scalarData[i] === activeSegment.segmentIndex) {
+          positivePixels.push(i);
+        }
+      }
+
+      if (!positivePixels.length || !rows || !width) {
+        uiNotificationService.show({
+          title: 'Propagate Mask',
+          message: 'Current segment is empty on this slice.',
+          type: 'warning',
+          duration: 4000,
+        });
+        return;
+      }
+
+      let minX = Number.POSITIVE_INFINITY;
+      let minY = Number.POSITIVE_INFINITY;
+      let maxX = Number.NEGATIVE_INFINITY;
+      let maxY = Number.NEGATIVE_INFINITY;
+      let sumX = 0;
+      let sumY = 0;
+
+      for (let i = 0; i < positivePixels.length; i++) {
+        const idx = positivePixels[i];
+        const y = Math.floor(idx / width);
+        const x = idx % width;
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        sumX += x;
+        sumY += y;
+      }
+
+      const cx = Math.round(sumX / positivePixels.length);
+      const cy = Math.round(sumY / positivePixels.length);
+      const generatedPosPoints: number[][] = [[cx, cy, currentImageIdIndex]];
+      const generatedPosBoxes: number[][][] = [
+        [
+          [minX, minY, currentImageIdIndex],
+          [maxX, maxY, currentImageIdIndex],
+        ],
+      ];
+
+      if (!generatedPosPoints.length || !generatedPosBoxes.length) {
+        uiNotificationService.show({
+          title: 'Propagate Mask',
+          message: 'Failed to create mask prompts from current segment.',
+          type: 'warning',
+          duration: 4000,
+        });
+        return;
+      }
+
+      return commandsManager.run('sam2', {
+        generatedPosPoints,
+        generatedPosBoxes,
+        oneSlice: false,
+      });
+    },
+
     /**
      * Runs a command in multi-monitor mode.  No-op if not multi-monitor.
      */
@@ -772,7 +922,14 @@ const commandsModule = ({
       });
     },
 
-    async sam2() {
+    async sam2(options: {
+      baseline?: boolean;
+      generatedPosPoints?: number[][];
+      generatedPosBoxes?: number[][][];
+      baselineSigma?: number;
+      baselineClipQuantile?: number;
+      oneSlice?: boolean;
+    } = {}) {
       if (toolboxState.getLocked()) {
         return;
       }
@@ -870,13 +1027,18 @@ const commandsModule = ({
     }
   }
 
-      const pos_points = currentMeasurements
+      const measuredPosPoints = currentMeasurements
         .filter(e => {
           return e.toolName === 'Probe2' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === false && e.metadata.SegmentNumber === segmentNumber;
         })
         .map(e => {
           return Object.values(e.data)[0].index;
         });
+
+      const pos_points = [
+        ...measuredPosPoints,
+        ...(options.generatedPosPoints || []),
+      ];
       const neg_points = currentMeasurements
         .filter(e => {
           return e.toolName === 'Probe2' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === true && e.metadata.SegmentNumber === segmentNumber;
@@ -893,6 +1055,7 @@ const commandsModule = ({
           return Object.values(e.data)[0].pointsInShape 
         })
         .map(e => { return [e.at(0).pointIJK, e.at(-1).pointIJK] })
+        .concat(options.generatedPosBoxes || [])
 
 
 
@@ -915,7 +1078,9 @@ const commandsModule = ({
         const event = new Event('measurement-state-changed');
         document.dispatchEvent(event);
       }, 200);
-      if (pos_points.length == 0 && neg_points.length == 0 && pos_boxes.length == 0 && text_prompts.length == 0){
+      const useBaseline = options.baseline === true;
+
+      if (!useBaseline && pos_points.length == 0 && neg_points.length == 0 && pos_boxes.length == 0 && text_prompts.length == 0){
         uiNotificationService.show({
           title: 'Prompt warning',
           message: 'Only pos/neg points and bbox are available for SAM2-based models',
@@ -925,15 +1090,17 @@ const commandsModule = ({
         return;
       }
 
-      uiNotificationService.show({
-        title: 'Prompt info',
-        message: 'Only pos/neg points and bbox are accepted for SAM2-based models, other prompt types are ignored',
-        type: 'info',
-        duration: 4000,
-      });
+      if (!useBaseline) {
+        uiNotificationService.show({
+          title: 'Prompt info',
+          message: 'Only pos/neg points and bbox are accepted for SAM2-based models, other prompt types are ignored',
+          type: 'info',
+          duration: 4000,
+        });
+      }
 
       let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
-      let params = {
+      let params: Record<string, unknown> = {
         largest_cc: false,
         result_extension: '.nii.gz',
         result_dtype: 'uint16',
@@ -946,7 +1113,17 @@ const commandsModule = ({
         texts: text_prompts,
         nninter: false,
         medsam2: medsam2,
+        baseline: useBaseline,
+        baseline_sigma: options.baselineSigma,
+        baseline_clip_quantile: options.baselineClipQuantile,
       };
+
+      if (options.oneSlice) {
+        params = {
+          ...params,
+          one: true,
+        };
+      }
 
       let data = MonaiLabelClient.constructFormData(params, null);
 
@@ -2098,6 +2275,8 @@ const commandsModule = ({
     openDICOMTagViewer: actions.openDICOMTagViewer,
     setAiToolActive: actions.setAiToolActive,
     runAiSegmentation: actions.runAiSegmentation,
+    runBaselineSegmentation: actions.runBaselineSegmentation,
+    propagateCurrentMask: actions.propagateCurrentMask,
     sam2: actions.sam2,
     initNninter: actions.initNninter,
     resetNninter: actions.resetNninter,
