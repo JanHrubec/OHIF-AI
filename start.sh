@@ -82,5 +82,5 @@ else
 fi
 
 echo "==> Starting services without rebuild"
-prepare_runtime_network
+clean_stale
 $compose up -d --no-build --remove-orphans
