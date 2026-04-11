@@ -11,6 +11,7 @@
 
 import copy
 import hashlib
+import json
 import logging
 import os
 import time
@@ -1090,6 +1091,35 @@ class BasicInferTask(InferTask):
             result_json["pos_points"]=copy.deepcopy(data["pos_points"])
             result_json["neg_points"]=copy.deepcopy(data["neg_points"])
             result_json["pos_boxes"]=copy.deepcopy(data["pos_boxes"])
+
+            use_mask_seed = str(data.get("use_mask_seed", "false")).strip().lower() in ("1", "true", "yes", "on")
+            seed_masks_raw = data.get("seed_masks", [])
+            if isinstance(seed_masks_raw, str):
+                try:
+                    seed_masks_raw = json.loads(seed_masks_raw)
+                except Exception:
+                    logger.warning("Failed to decode seed_masks payload; ignoring mask seeds")
+                    seed_masks_raw = []
+
+            seed_masks_by_slice: Dict[int, np.ndarray] = {}
+            if use_mask_seed and isinstance(seed_masks_raw, list):
+                for entry in seed_masks_raw:
+                    if not isinstance(entry, dict):
+                        continue
+                    slice_idx = entry.get("slice")
+                    indices = entry.get("indices", [])
+                    if slice_idx is None:
+                        continue
+                    try:
+                        slice_idx = int(slice_idx)
+                    except Exception:
+                        continue
+                    if not isinstance(indices, list) or len(indices) == 0:
+                        continue
+                    try:
+                        seed_masks_by_slice[slice_idx] = np.asarray(indices, dtype=np.int64)
+                    except Exception:
+                        continue
             
             len_z = img.GetSize()[2]
             len_y = img.GetSize()[1]
@@ -1217,6 +1247,32 @@ class BasicInferTask(InferTask):
                 pos_points = np.array([i[0:2] for i in result_json['pos_points'] if i[2]==value], dtype=np.int16)
                 neg_points = np.array([i[0:2] for i in result_json['neg_points'] if i[2]==value], dtype=np.int16)
                 pre_boxes = np.array([i for i in result_json["pos_boxes"] if i[0][2]==value], dtype=np.int16)
+
+                if use_mask_seed and value in seed_masks_by_slice:
+                    flat_indices = seed_masks_by_slice[value]
+                    if flat_indices.size > 0:
+                        flat_size = len_y * len_x
+                        valid_indices = flat_indices[(flat_indices >= 0) & (flat_indices < flat_size)]
+                        if valid_indices.size > 0:
+                            seed_mask = np.zeros((len_y, len_x), dtype=np.uint8)
+                            ys = valid_indices // len_x
+                            xs = valid_indices % len_x
+                            seed_mask[ys, xs] = 1
+                            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+                                if medsam2 == 'sam3':
+                                    _, _, _, _ = predictor.add_new_mask(
+                                        inference_state=inference_state,
+                                        frame_idx=ann_frame_idx,
+                                        obj_id=ann_obj_id,
+                                        mask=torch.from_numpy(seed_mask),
+                                    )
+                                else:
+                                    _, _, _ = predictor.add_new_mask(
+                                        inference_state=inference_state,
+                                        frame_idx=ann_frame_idx,
+                                        obj_id=ann_obj_id,
+                                        mask=seed_mask,
+                                    )
 
                 if len(neg_points) >0 and len(pos_points) >0:
                     points = np.concatenate((pos_points, neg_points), axis=0)
