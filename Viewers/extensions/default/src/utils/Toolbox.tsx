@@ -44,6 +44,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
   const [baselineClipQuantile, setBaselineClipQuantile] = useState<number>(toolboxState.getBaselineClipQuantile());
   const [baselineThresholdScale, setBaselineThresholdScale] = useState<number>(toolboxState.getBaselineThresholdScale());
   const [baselineMinComponentSize, setBaselineMinComponentSize] = useState<number>(toolboxState.getBaselineMinComponentSize());
+  const [useCurrentMaskAsSeed, setUseCurrentMaskAsSeed] = useState<boolean>(toolboxState.getUseCurrentMaskAsSeed());
   const [medgemmaResult, setMedgemmaResult] = useState(toolboxState.getMedgemmaResult());
   const [medgemmaInstruction, setMedgemmaInstruction] = useState(toolboxState.getMedgemmaInstruction());
   const [medgemmaQuery, setMedgemmaQuery] = useState(toolboxState.getMedgemmaQuery());
@@ -81,6 +82,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
       setBaselineClipQuantile(toolboxState.getBaselineClipQuantile());
       setBaselineThresholdScale(toolboxState.getBaselineThresholdScale());
       setBaselineMinComponentSize(toolboxState.getBaselineMinComponentSize());
+      setUseCurrentMaskAsSeed(toolboxState.getUseCurrentMaskAsSeed());
       setIsLocked(toolboxState.getLocked());
     };
 
@@ -394,6 +396,24 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                         setRefineNew(checked);
                         toolboxState.setRefineNew(checked);
                         console.log('Refine/New:', checked);
+                      }}
+                     />
+                   </div>
+                   <div className="flex items-center gap-2">
+                     <Label
+                       htmlFor="use-current-mask-seed"
+                       title="Use active segment mask as initialization before prompt refinement"
+                     >
+                       Seed Mask
+                     </Label>
+                     <Switch
+                       id="use-current-mask-seed"
+                       checked={useCurrentMaskAsSeed}
+                       disabled={refineNew}
+                       onCheckedChange={(checked) => {
+                        setUseCurrentMaskAsSeed(checked);
+                        toolboxState.setUseCurrentMaskAsSeed(checked);
+                        console.log('Use current mask as seed:', checked);
                       }}
                      />
                    </div>

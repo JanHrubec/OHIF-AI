@@ -11,6 +11,7 @@ let baselineSigma = 1.0;
 let baselineClipQuantile = 0.98;
 let baselineThresholdScale = 1.0;
 let baselineMinComponentSize = 0;
+let useCurrentMaskAsSeed = true;
 let medgemmaResult: string | null = null;
 let medgemmaInstruction: string = '';
 let medgemmaQuery: string = '';
@@ -30,11 +31,7 @@ export const toolboxState = {
   setRefineNew: (enabled: boolean) => {
     refineNew = enabled;
     if (enabled) {
-        // Note: resetNninter should be called from the component/command that uses this state
-         // When RefineNew is enabled and model is nnInteractive, reset nninter
-         if (selectedModel === 'nnInteractive') {
-          commandsManager?.run('resetNninter');
-        }
+        // Note: resetNninter should be called from command handlers, not global state.
         toolboxState.setPosNeg(false);
     }
   },
@@ -79,6 +76,10 @@ export const toolboxState = {
   getBaselineMinComponentSize: () => baselineMinComponentSize,
   setBaselineMinComponentSize: (value: number) => {
     baselineMinComponentSize = value;
+  },
+  getUseCurrentMaskAsSeed: () => useCurrentMaskAsSeed,
+  setUseCurrentMaskAsSeed: (enabled: boolean) => {
+    useCurrentMaskAsSeed = enabled;
   },
   getMedgemmaResult: () => medgemmaResult,
   setMedgemmaResult: (result: string | null) => {

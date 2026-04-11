@@ -337,6 +337,15 @@ const commandsModule = ({
     return out;
   };
 
+  const getPayloadSizeDelta = (
+    payloadLength: number,
+    numSlices: number,
+    voxelsPerSlice: number,
+    bytesPerVoxel: number
+  ): number => {
+    return payloadLength - numSlices * voxelsPerSlice * bytesPerVoxel;
+  };
+
   const actions = {
     setAiToolActive: ({ toolName }: { toolName: string }) => {
       if (!toolName) {
@@ -992,6 +1001,7 @@ const commandsModule = ({
       baselineClipQuantile?: number;
       baselineThresholdScale?: number;
       baselineMinComponentSize?: number;
+      useMaskSeed?: boolean;
       oneSlice?: boolean;
     } = {}) {
       if (toolboxState.getLocked()) {
@@ -1121,6 +1131,61 @@ const commandsModule = ({
         .map(e => { return [e.at(0).pointIJK, e.at(-1).pointIJK] })
         .concat(options.generatedPosBoxes || [])
 
+      const useBaseline = options.baseline === true;
+      const useMaskSeed =
+        options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
+
+      let seedMasks: Array<{ slice: number; indices: number[] }> = [];
+      if (!useBaseline && !toolboxState.getRefineNew() && useMaskSeed && activeSegmentation) {
+        const promptSlices = new Set<number>();
+        pos_points.forEach(p => {
+          if (Number.isFinite(p?.[2])) {
+            promptSlices.add(p[2]);
+          }
+        });
+        neg_points.forEach(p => {
+          if (Number.isFinite(p?.[2])) {
+            promptSlices.add(p[2]);
+          }
+        });
+        pos_boxes.forEach(box => {
+          box?.forEach(point => {
+            if (Number.isFinite(point?.[2])) {
+              promptSlices.add(point[2]);
+            }
+          });
+        });
+
+        const labelmapImageIds =
+          activeSegmentation?.representationData?.Labelmap?.imageIds || [];
+
+        for (const slice of promptSlices) {
+          if (slice < 0 || slice >= labelmapImageIds.length) {
+            continue;
+          }
+
+          const labelmapImage = cache.getImage(labelmapImageIds[slice]);
+          const voxelManager = labelmapImage?.voxelManager as
+            | csTypes.IVoxelManager<number>
+            | undefined;
+          const scalarData = voxelManager?.getScalarData?.();
+          if (!scalarData?.length) {
+            continue;
+          }
+
+          const indices: number[] = [];
+          for (let idx = 0; idx < scalarData.length; idx++) {
+            if (scalarData[idx] === segmentNumber) {
+              indices.push(idx);
+            }
+          }
+
+          if (indices.length > 0) {
+            seedMasks.push({ slice, indices });
+          }
+        }
+      }
+
 
 
       //Disable text prompts for SAM2
@@ -1142,7 +1207,6 @@ const commandsModule = ({
         const event = new Event('measurement-state-changed');
         document.dispatchEvent(event);
       }, 200);
-      const useBaseline = options.baseline === true;
 
       if (!useBaseline && pos_points.length == 0 && neg_points.length == 0 && pos_boxes.length == 0 && text_prompts.length == 0){
         uiNotificationService.show({
@@ -1182,6 +1246,8 @@ const commandsModule = ({
         baseline_clip_quantile: options.baselineClipQuantile,
         baseline_threshold_scale: options.baselineThresholdScale,
         baseline_min_component_size: options.baselineMinComponentSize,
+        use_mask_seed: !useBaseline && !toolboxState.getRefineNew() && useMaskSeed,
+        seed_masks: seedMasks,
       };
 
       if (options.oneSlice) {
@@ -1242,6 +1308,7 @@ const commandsModule = ({
           const label_name = meta.label_name
           const raw = seg
           const new_arrayBuffer = new Uint8Array(raw);
+          let payloadMismatchNotified = false;
 
           let imageIds = currentDisplaySets.imageIds
           let existingSegments: { [segmentIndex: string]: cstTypes.Segment } = {};
@@ -1287,6 +1354,21 @@ const commandsModule = ({
           const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
             ?.getScalarData()?.length || 0);
           const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
+          const payloadSizeDelta = getPayloadSizeDelta(
+            new_arrayBuffer.length,
+            derivedImages_new.length,
+            firstVoxelsPerSlice,
+            bytesPerVoxel
+          );
+          if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
+            payloadMismatchNotified = true;
+            uiNotificationService.show({
+              title: 'Segmentation payload warning',
+              message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
+              type: 'warning',
+              duration: 5000,
+            });
+          }
           for (let i = 0; i < derivedImages_new.length; i++) {
             const voxelManager = derivedImages_new[i]
               .voxelManager as csTypes.IVoxelManager<number>;
@@ -1348,6 +1430,21 @@ const commandsModule = ({
             const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
               ?.getScalarData()?.length || 0);
             const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
+            const payloadSizeDelta = getPayloadSizeDelta(
+              new_arrayBuffer.length,
+              derivedImages_new.length,
+              firstVoxelsPerSlice,
+              bytesPerVoxel
+            );
+            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
+              payloadMismatchNotified = true;
+              uiNotificationService.show({
+                title: 'Segmentation payload warning',
+                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
+                type: 'warning',
+                duration: 5000,
+              });
+            }
             for (let i = 0; i < derivedImages_new.length; i++) {
               const voxelManager = derivedImages_new[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
@@ -1374,6 +1471,21 @@ const commandsModule = ({
             const firstVoxelsPerSlice = ((merged_derivedImages[0]?.voxelManager as csTypes.IVoxelManager<number>)
               ?.getScalarData()?.length || 0);
             const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, merged_derivedImages.length, firstVoxelsPerSlice);
+            const payloadSizeDelta = getPayloadSizeDelta(
+              new_arrayBuffer.length,
+              merged_derivedImages.length,
+              firstVoxelsPerSlice,
+              bytesPerVoxel
+            );
+            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
+              payloadMismatchNotified = true;
+              uiNotificationService.show({
+                title: 'Segmentation payload warning',
+                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
+                type: 'warning',
+                duration: 5000,
+              });
+            }
             for (let i = 0; i < merged_derivedImages.length; i++) {
               const voxelManager = merged_derivedImages[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
@@ -1885,6 +1997,7 @@ const commandsModule = ({
             const label_name = meta.label_name
             const raw = seg
             const new_arrayBuffer = new Uint8Array(raw);
+            let payloadMismatchNotified = false;
 
             let imageIds = currentDisplaySets.imageIds
 
@@ -1937,6 +2050,21 @@ const commandsModule = ({
           const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
             ?.getScalarData()?.length || 0);
           const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
+          const payloadSizeDelta = getPayloadSizeDelta(
+            new_arrayBuffer.length,
+            derivedImages_new.length,
+            firstVoxelsPerSlice,
+            bytesPerVoxel
+          );
+          if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
+            payloadMismatchNotified = true;
+            uiNotificationService.show({
+              title: 'Segmentation payload warning',
+              message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
+              type: 'warning',
+              duration: 5000,
+            });
+          }
           for (let i = 0; i < derivedImages_new.length; i++) {
             const voxelManager = derivedImages_new[i]
               .voxelManager as csTypes.IVoxelManager<number>;
@@ -2002,6 +2130,21 @@ const commandsModule = ({
             const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
               ?.getScalarData()?.length || 0);
             const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
+            const payloadSizeDelta = getPayloadSizeDelta(
+              new_arrayBuffer.length,
+              derivedImages_new.length,
+              firstVoxelsPerSlice,
+              bytesPerVoxel
+            );
+            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
+              payloadMismatchNotified = true;
+              uiNotificationService.show({
+                title: 'Segmentation payload warning',
+                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
+                type: 'warning',
+                duration: 5000,
+              });
+            }
             for (let i = 0; i < derivedImages_new.length; i++) {
               const voxelManager = derivedImages_new[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
@@ -2028,6 +2171,21 @@ const commandsModule = ({
             const firstVoxelsPerSlice = ((merged_derivedImages[0]?.voxelManager as csTypes.IVoxelManager<number>)
               ?.getScalarData()?.length || 0);
             const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, merged_derivedImages.length, firstVoxelsPerSlice);
+            const payloadSizeDelta = getPayloadSizeDelta(
+              new_arrayBuffer.length,
+              merged_derivedImages.length,
+              firstVoxelsPerSlice,
+              bytesPerVoxel
+            );
+            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
+              payloadMismatchNotified = true;
+              uiNotificationService.show({
+                title: 'Segmentation payload warning',
+                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
+                type: 'warning',
+                duration: 5000,
+              });
+            }
             for (let i = 0; i < merged_derivedImages.length; i++) {
               const voxelManager = merged_derivedImages[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
