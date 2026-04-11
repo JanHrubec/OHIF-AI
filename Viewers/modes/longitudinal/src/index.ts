@@ -153,6 +153,7 @@ function modeFactory({ modeConfiguration }) {
       toolbarService.createButtonSection('testMedgemmaToolbox', ['testMedgemmaContainer']);
 
       toolbarService.createButtonSection('aiToolBoxSection', [
+        'nninter',
         'Probe2',
         'PlanarFreehandROI2',
         'PlanarFreehandROI3',
@@ -162,7 +163,6 @@ function modeFactory({ modeConfiguration }) {
 
       // Porosity workflow actions and controls.
       toolbarService.createButtonSection('porosityToolBoxSection', [
-        'nninter',
         'baselineSegmentation',
         'propagateCurrentMask',
       ]);

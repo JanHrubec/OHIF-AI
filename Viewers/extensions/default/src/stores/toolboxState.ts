@@ -9,6 +9,8 @@ let locked = false;
 let currentActiveSegment = 1;
 let baselineSigma = 1.0;
 let baselineClipQuantile = 0.98;
+let baselineThresholdScale = 1.0;
+let baselineMinComponentSize = 0;
 let medgemmaResult: string | null = null;
 let medgemmaInstruction: string = '';
 let medgemmaQuery: string = '';
@@ -69,6 +71,14 @@ export const toolboxState = {
   getBaselineClipQuantile: () => baselineClipQuantile,
   setBaselineClipQuantile: (value: number) => {
     baselineClipQuantile = value;
+  },
+  getBaselineThresholdScale: () => baselineThresholdScale,
+  setBaselineThresholdScale: (value: number) => {
+    baselineThresholdScale = value;
+  },
+  getBaselineMinComponentSize: () => baselineMinComponentSize,
+  setBaselineMinComponentSize: (value: number) => {
+    baselineMinComponentSize = value;
   },
   getMedgemmaResult: () => medgemmaResult,
   setMedgemmaResult: (result: string | null) => {

@@ -529,6 +529,8 @@ class BasicInferTask(InferTask):
 
             clip_quantile = float(data.get("baseline_clip_quantile", 0.98))
             sigma = float(data.get("baseline_sigma", 1.0))
+            threshold_scale = float(data.get("baseline_threshold_scale", 1.0))
+            min_component_size = int(data.get("baseline_min_component_size", 0))
 
             img_np = sitk.GetArrayFromImage(img).astype(np.float32)
 
@@ -555,7 +557,8 @@ class BasicInferTask(InferTask):
                 normed = np.zeros_like(normed, dtype=np.float32)
 
             smoothed = ndimage.gaussian_filter(normed, sigma=sigma)
-            thresh = threshold_otsu(smoothed)
+            thresh = threshold_otsu(smoothed) * threshold_scale
+            thresh = max(0.0, min(1.0, thresh))
             dark_mask = smoothed < thresh
 
             struct = ndimage.generate_binary_structure(3, 3)
@@ -567,6 +570,14 @@ class BasicInferTask(InferTask):
                 bg_label = np.argmax(component_sizes) + 1
                 output[labelled == bg_label] = 0
                 porosity_mask = dark_mask & (labelled != bg_label)
+                if min_component_size > 0:
+                    keep_mask = np.zeros_like(porosity_mask, dtype=bool)
+                    for comp_idx, comp_size in enumerate(component_sizes, start=1):
+                        if comp_idx == bg_label:
+                            continue
+                        if comp_size >= min_component_size:
+                            keep_mask |= labelled == comp_idx
+                    porosity_mask = porosity_mask & keep_mask
                 output[porosity_mask] = 2
 
             pred = (output == 2).astype(np.uint8)
@@ -576,6 +587,8 @@ class BasicInferTask(InferTask):
                 "method": "baseline_thresholding",
                 "baseline_sigma": sigma,
                 "baseline_clip_quantile": clip_quantile,
+                "baseline_threshold_scale": threshold_scale,
+                "baseline_min_component_size": min_component_size,
             }
             final_result_json["sam_elapsed"] = elapsed
 

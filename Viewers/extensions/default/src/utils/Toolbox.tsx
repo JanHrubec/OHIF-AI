@@ -42,6 +42,8 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
   const [selectedModel, setSelectedModel] = useState<'nnInteractive' | 'sam2' | 'medsam2' | 'sam3'>(toolboxState.getSelectedModel());
   const [baselineSigma, setBaselineSigma] = useState<number>(toolboxState.getBaselineSigma());
   const [baselineClipQuantile, setBaselineClipQuantile] = useState<number>(toolboxState.getBaselineClipQuantile());
+  const [baselineThresholdScale, setBaselineThresholdScale] = useState<number>(toolboxState.getBaselineThresholdScale());
+  const [baselineMinComponentSize, setBaselineMinComponentSize] = useState<number>(toolboxState.getBaselineMinComponentSize());
   const [medgemmaResult, setMedgemmaResult] = useState(toolboxState.getMedgemmaResult());
   const [medgemmaInstruction, setMedgemmaInstruction] = useState(toolboxState.getMedgemmaInstruction());
   const [medgemmaQuery, setMedgemmaQuery] = useState(toolboxState.getMedgemmaQuery());
@@ -77,6 +79,8 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
       setSelectedModel(toolboxState.getSelectedModel());
       setBaselineSigma(toolboxState.getBaselineSigma());
       setBaselineClipQuantile(toolboxState.getBaselineClipQuantile());
+      setBaselineThresholdScale(toolboxState.getBaselineThresholdScale());
+      setBaselineMinComponentSize(toolboxState.getBaselineMinComponentSize());
       setIsLocked(toolboxState.getLocked());
     };
 
@@ -356,7 +360,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
           return (
             <React.Fragment key={sectionId}>
               {isAIToolBox && (
-                <div className="flex justify-center items-center gap-4 py-2 px-1">
+                <div className="flex flex-wrap justify-center items-center gap-3 py-2 px-1">
                    <div className="flex items-center gap-2">
                      <Label htmlFor="live-mode">Live Mode</Label>
                      <Switch
@@ -393,12 +397,8 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                       }}
                      />
                    </div>
-                 </div>
-                )}
-              {isPorosityToolbox && (
-                <div className="flex justify-center items-center gap-4 py-2 px-1">
-                   <div className="flex items-center gap-2">
-                     <Label htmlFor="model-selection">Model</Label>
+                   <div className="flex items-center gap-1">
+                     <Label htmlFor="model-selection" title="Segmentation model used for Run Segmentation and interactive prompts">Model</Label>
                      <Select
                        value={selectedModel}
                        onValueChange={(value) => {
@@ -408,7 +408,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                          console.log('Model selection:', model);
                        }}
                      >
-                       <SelectTrigger id="model-selection" className="w-[140px]">
+                       <SelectTrigger id="model-selection" className="w-[118px] h-8" title="Choose model">
                          <SelectValue placeholder="Select model" />
                        </SelectTrigger>
                        <SelectContent>
@@ -419,15 +419,20 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        </SelectContent>
                      </Select>
                    </div>
-                   <div className="flex items-center gap-2">
-                     <Label htmlFor="baseline-sigma">Baseline Sigma</Label>
+                 </div>
+                )}
+              {isPorosityToolbox && (
+                <div className="flex flex-wrap items-end gap-2 py-2 px-1 text-xs">
+                   <div className="flex items-center gap-1">
+                     <Label htmlFor="baseline-sigma" title="Gaussian smoothing before thresholding">Sigma</Label>
                      <Input
                        id="baseline-sigma"
-                       className="w-[90px]"
+                       className="w-[68px] h-8 text-xs"
                        type="number"
                        min={0}
                        max={10}
                        step={0.1}
+                       title="Higher = smoother, lower sensitivity to tiny pores"
                        value={baselineSigma}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -439,15 +444,16 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        }}
                      />
                    </div>
-                   <div className="flex items-center gap-2">
-                     <Label htmlFor="baseline-clip">Baseline Clip</Label>
+                   <div className="flex items-center gap-1">
+                     <Label htmlFor="baseline-clip" title="Upper intensity clipping quantile">Clip</Label>
                      <Input
                        id="baseline-clip"
-                       className="w-[90px]"
+                       className="w-[68px] h-8 text-xs"
                        type="number"
                        min={0.5}
                        max={1}
                        step={0.01}
+                       title="Lower values boost contrast in darker regions"
                        value={baselineClipQuantile}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -456,6 +462,47 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                          }
                          setBaselineClipQuantile(next);
                          toolboxState.setBaselineClipQuantile(next);
+                       }}
+                     />
+                   </div>
+                   <div className="flex items-center gap-1">
+                     <Label htmlFor="baseline-threshold-scale" title="Multiplier for Otsu threshold">Thresh</Label>
+                     <Input
+                       id="baseline-threshold-scale"
+                       className="w-[68px] h-8 text-xs"
+                       type="number"
+                       min={0.5}
+                       max={2}
+                       step={0.05}
+                       title="Higher = more sensitive to subtle dark pores"
+                       value={baselineThresholdScale}
+                       onChange={(e) => {
+                         const next = Number(e.target.value);
+                         if (!Number.isFinite(next)) {
+                           return;
+                         }
+                         setBaselineThresholdScale(next);
+                         toolboxState.setBaselineThresholdScale(next);
+                       }}
+                     />
+                   </div>
+                   <div className="flex items-center gap-1">
+                     <Label htmlFor="baseline-min-size" title="Minimum connected-component size in voxels">MinPx</Label>
+                     <Input
+                       id="baseline-min-size"
+                       className="w-[70px] h-8 text-xs"
+                       type="number"
+                       min={0}
+                       step={10}
+                       title="Increase to remove tiny noise components"
+                       value={baselineMinComponentSize}
+                       onChange={(e) => {
+                         const next = Number(e.target.value);
+                         if (!Number.isFinite(next)) {
+                           return;
+                         }
+                         setBaselineMinComponentSize(next);
+                         toolboxState.setBaselineMinComponentSize(next);
                        }}
                      />
                    </div>

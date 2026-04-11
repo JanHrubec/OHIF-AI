@@ -277,6 +277,66 @@ const commandsModule = ({
     );
   }
 
+  // Decode a single segmentation slice from raw payload while tolerating
+  // different voxel byte widths returned by backend writer (uint8/uint16/float32).
+  const inferBytesPerVoxel = (
+    payloadLength: number,
+    numSlices: number,
+    voxelsPerSlice: number
+  ): number => {
+    const totalVoxels = numSlices * voxelsPerSlice;
+    if (!totalVoxels) {
+      return 1;
+    }
+
+    const candidates = [1, 2, 4];
+    let best = 1;
+    let bestDelta = Number.POSITIVE_INFINITY;
+
+    for (const c of candidates) {
+      const expected = totalVoxels * c;
+      const delta = Math.abs(payloadLength - expected);
+      if (delta < bestDelta) {
+        best = c;
+        bestDelta = delta;
+      }
+    }
+
+    return best;
+  };
+
+  const getSegSliceMask = (
+    payload: Uint8Array,
+    sliceIndex: number,
+    voxelsPerSlice: number,
+    bytesPerVoxel: number
+  ): Uint8Array => {
+    const sliceByteLength = voxelsPerSlice * bytesPerVoxel;
+    const byteStart = sliceIndex * sliceByteLength;
+    const byteEnd = byteStart + sliceByteLength;
+
+    if (byteStart < 0 || byteEnd > payload.length) {
+      return new Uint8Array(voxelsPerSlice);
+    }
+
+    if (bytesPerVoxel === 1) {
+      return payload.slice(byteStart, byteStart + voxelsPerSlice);
+    }
+
+    const view = new DataView(payload.buffer, payload.byteOffset + byteStart, sliceByteLength);
+    const out = new Uint8Array(voxelsPerSlice);
+
+    for (let i = 0; i < voxelsPerSlice; i++) {
+      if (bytesPerVoxel === 2) {
+        out[i] = view.getUint16(i * 2, true) > 0 ? 1 : 0;
+      } else {
+        out[i] = view.getFloat32(i * 4, true) > 0 ? 1 : 0;
+      }
+    }
+
+    return out;
+  };
+
   const actions = {
     setAiToolActive: ({ toolName }: { toolName: string }) => {
       if (!toolName) {
@@ -312,6 +372,8 @@ const commandsModule = ({
         baseline: true,
         baselineSigma: toolboxState.getBaselineSigma(),
         baselineClipQuantile: toolboxState.getBaselineClipQuantile(),
+        baselineThresholdScale: toolboxState.getBaselineThresholdScale(),
+        baselineMinComponentSize: toolboxState.getBaselineMinComponentSize(),
       });
     },
 
@@ -928,6 +990,8 @@ const commandsModule = ({
       generatedPosBoxes?: number[][][];
       baselineSigma?: number;
       baselineClipQuantile?: number;
+      baselineThresholdScale?: number;
+      baselineMinComponentSize?: number;
       oneSlice?: boolean;
     } = {}) {
       if (toolboxState.getLocked()) {
@@ -1103,7 +1167,7 @@ const commandsModule = ({
       let params: Record<string, unknown> = {
         largest_cc: false,
         result_extension: '.nii.gz',
-        result_dtype: 'uint16',
+        result_dtype: 'uint8',
         result_compress: false,
         studyInstanceUID: currentDisplaySets.StudyInstanceUID,
         restore_label_idx: false,
@@ -1116,6 +1180,8 @@ const commandsModule = ({
         baseline: useBaseline,
         baseline_sigma: options.baselineSigma,
         baseline_clip_quantile: options.baselineClipQuantile,
+        baseline_threshold_scale: options.baselineThresholdScale,
+        baseline_min_component_size: options.baselineMinComponentSize,
       };
 
       if (options.oneSlice) {
@@ -1218,11 +1284,14 @@ const commandsModule = ({
             derivedImages_new.reverse();
           }
           console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
+          const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
+            ?.getScalarData()?.length || 0);
+          const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
           for (let i = 0; i < derivedImages_new.length; i++) {
             const voxelManager = derivedImages_new[i]
               .voxelManager as csTypes.IVoxelManager<number>;
             let scalarData = voxelManager.getScalarData();
-            const sliceData = new_arrayBuffer.slice(i * scalarData.length, (i + 1) * scalarData.length);
+            const sliceData = getSegSliceMask(new_arrayBuffer, i, scalarData.length, bytesPerVoxel);
             if (sliceData.some(v => v === 1)){
               voxelManager.setScalarData(sliceData.map(v => v === 1 ? segmentNumber : v));
               z_range.push(i);
@@ -1276,11 +1345,14 @@ const commandsModule = ({
               derivedImages_new.reverse();
             }
             console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
+            const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
+              ?.getScalarData()?.length || 0);
+            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
             for (let i = 0; i < derivedImages_new.length; i++) {
               const voxelManager = derivedImages_new[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
               let scalarData = voxelManager.getScalarData();
-              const sliceData = new_arrayBuffer.slice(i * scalarData.length, (i + 1) * scalarData.length);
+              const sliceData = getSegSliceMask(new_arrayBuffer, i, scalarData.length, bytesPerVoxel);
               if (sliceData.some(v => v === 1)){
                 voxelManager.setScalarData(sliceData.map(v => v === 1 ? segmentNumber : v));
                 if (flipped) {
@@ -1299,11 +1371,14 @@ const commandsModule = ({
             if(flipped){
               merged_derivedImages.reverse();
             }
+            const firstVoxelsPerSlice = ((merged_derivedImages[0]?.voxelManager as csTypes.IVoxelManager<number>)
+              ?.getScalarData()?.length || 0);
+            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, merged_derivedImages.length, firstVoxelsPerSlice);
             for (let i = 0; i < merged_derivedImages.length; i++) {
               const voxelManager = merged_derivedImages[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
               let scalarData = voxelManager.getScalarData();
-              const sliceData = new_arrayBuffer.slice(i * scalarData.length, (i + 1) * scalarData.length);
+              const sliceData = getSegSliceMask(new_arrayBuffer, i, scalarData.length, bytesPerVoxel);
               if (!toolboxState.getRefineNew()){
                 if (scalarData.some(v => v === segmentNumber)){
                   voxelManager.setScalarData(scalarData.map(v => v === segmentNumber ? 0 : v));
@@ -1859,11 +1934,14 @@ const commandsModule = ({
             derivedImages_new.reverse();
           }
           console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
+          const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
+            ?.getScalarData()?.length || 0);
+          const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
           for (let i = 0; i < derivedImages_new.length; i++) {
             const voxelManager = derivedImages_new[i]
               .voxelManager as csTypes.IVoxelManager<number>;
             let scalarData = voxelManager.getScalarData();
-            const sliceData = new_arrayBuffer.slice(i * scalarData.length, (i + 1) * scalarData.length);
+            const sliceData = getSegSliceMask(new_arrayBuffer, i, scalarData.length, bytesPerVoxel);
             if (sliceData.some(v => v === 1)){
               voxelManager.setScalarData(sliceData.map(v => v === 1 ? segmentNumber : v));
               if (flipped) {
@@ -1921,11 +1999,14 @@ const commandsModule = ({
               derivedImages_new.reverse();
             }
             console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
+            const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
+              ?.getScalarData()?.length || 0);
+            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
             for (let i = 0; i < derivedImages_new.length; i++) {
               const voxelManager = derivedImages_new[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
               let scalarData = voxelManager.getScalarData();
-              const sliceData = new_arrayBuffer.slice(i * scalarData.length, (i + 1) * scalarData.length);
+              const sliceData = getSegSliceMask(new_arrayBuffer, i, scalarData.length, bytesPerVoxel);
               if (sliceData.some(v => v === 1)){
                 voxelManager.setScalarData(sliceData.map(v => v === 1 ? segmentNumber : v));
                 if (flipped) {
@@ -1944,11 +2025,14 @@ const commandsModule = ({
             if(flipped){
               merged_derivedImages.reverse();
             }
+            const firstVoxelsPerSlice = ((merged_derivedImages[0]?.voxelManager as csTypes.IVoxelManager<number>)
+              ?.getScalarData()?.length || 0);
+            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, merged_derivedImages.length, firstVoxelsPerSlice);
             for (let i = 0; i < merged_derivedImages.length; i++) {
               const voxelManager = merged_derivedImages[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
               let scalarData = voxelManager.getScalarData();
-              const sliceData = new_arrayBuffer.slice(i * scalarData.length, (i + 1) * scalarData.length);
+              const sliceData = getSegSliceMask(new_arrayBuffer, i, scalarData.length, bytesPerVoxel);
               if (!toolboxState.getRefineNew()){
                 if (scalarData.some(v => v === segmentNumber)){
                   voxelManager.setScalarData(scalarData.map(v => v === segmentNumber ? 0 : v));
