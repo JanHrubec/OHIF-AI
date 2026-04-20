@@ -421,105 +421,14 @@ const commandsModule = ({
         return;
       }
 
-      const currentImageIdIndex = servicesManager.services.cornerstoneViewportService
-        .getCornerstoneViewport(activeViewportId)
-        .getCurrentImageIdIndex();
-
-      const segImageIds = activeSegmentation?.representationData?.Labelmap?.imageIds || [];
-      const segSliceImage = segImageIds[currentImageIdIndex]
-        ? cache.getImage(segImageIds[currentImageIdIndex])
-        : null;
-
-      if (!segSliceImage) {
-        uiNotificationService.show({
-          title: 'Propagate Mask',
-          message: 'No mask available on current slice.',
-          type: 'warning',
-          duration: 4000,
-        });
-        return;
-      }
-
-      const sourceImage = currentDisplaySets.imageIds[currentImageIdIndex]
-        ? cache.getImage(currentDisplaySets.imageIds[currentImageIdIndex])
-        : null;
-
-      const voxelManager = segSliceImage.voxelManager as csTypes.IVoxelManager<number>;
-      const scalarData = voxelManager.getScalarData();
-
-      if (!scalarData?.length) {
-        uiNotificationService.show({
-          title: 'Propagate Mask',
-          message: 'Could not read current mask.',
-          type: 'warning',
-          duration: 4000,
-        });
-        return;
-      }
-
-      const rows = (sourceImage as any)?.rows || (segSliceImage as any)?.rows;
-      const cols = (sourceImage as any)?.columns || (segSliceImage as any)?.columns;
-      const width = cols || Math.round(Math.sqrt(scalarData.length));
-
-      const positivePixels: number[] = [];
-      for (let i = 0; i < scalarData.length; i++) {
-        if (scalarData[i] === activeSegment.segmentIndex) {
-          positivePixels.push(i);
-        }
-      }
-
-      if (!positivePixels.length || !rows || !width) {
-        uiNotificationService.show({
-          title: 'Propagate Mask',
-          message: 'Current segment is empty on this slice.',
-          type: 'warning',
-          duration: 4000,
-        });
-        return;
-      }
-
-      let minX = Number.POSITIVE_INFINITY;
-      let minY = Number.POSITIVE_INFINITY;
-      let maxX = Number.NEGATIVE_INFINITY;
-      let maxY = Number.NEGATIVE_INFINITY;
-      let sumX = 0;
-      let sumY = 0;
-
-      for (let i = 0; i < positivePixels.length; i++) {
-        const idx = positivePixels[i];
-        const y = Math.floor(idx / width);
-        const x = idx % width;
-        if (x < minX) minX = x;
-        if (x > maxX) maxX = x;
-        if (y < minY) minY = y;
-        if (y > maxY) maxY = y;
-        sumX += x;
-        sumY += y;
-      }
-
-      const cx = Math.round(sumX / positivePixels.length);
-      const cy = Math.round(sumY / positivePixels.length);
-      const generatedPosPoints: number[][] = [[cx, cy, currentImageIdIndex]];
-      const generatedPosBoxes: number[][][] = [
-        [
-          [minX, minY, currentImageIdIndex],
-          [maxX, maxY, currentImageIdIndex],
-        ],
-      ];
-
-      if (!generatedPosPoints.length || !generatedPosBoxes.length) {
-        uiNotificationService.show({
-          title: 'Propagate Mask',
-          message: 'Failed to create mask prompts from current segment.',
-          type: 'warning',
-          duration: 4000,
-        });
-        return;
+      // Always refine using the current segment mask seed.
+      // Do not auto-place synthetic points or boxes, as this is confusing.
+      if (toolboxState.getRefineNew()) {
+        toolboxState.setRefineNew(false);
       }
 
       return commandsManager.run('sam2', {
-        generatedPosPoints,
-        generatedPosBoxes,
+        useMaskSeed: true,
         oneSlice: false,
       });
     },
@@ -995,8 +904,6 @@ const commandsModule = ({
 
     async sam2(options: {
       baseline?: boolean;
-      generatedPosPoints?: number[][];
-      generatedPosBoxes?: number[][][];
       baselineSigma?: number;
       baselineClipQuantile?: number;
       baselineThresholdScale?: number;
@@ -1109,10 +1016,7 @@ const commandsModule = ({
           return Object.values(e.data)[0].index;
         });
 
-      const pos_points = [
-        ...measuredPosPoints,
-        ...(options.generatedPosPoints || []),
-      ];
+      const pos_points = measuredPosPoints;
       const neg_points = currentMeasurements
         .filter(e => {
           return e.toolName === 'Probe2' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === true && e.metadata.SegmentNumber === segmentNumber;
@@ -1129,7 +1033,7 @@ const commandsModule = ({
           return Object.values(e.data)[0].pointsInShape 
         })
         .map(e => { return [e.at(0).pointIJK, e.at(-1).pointIJK] })
-        .concat(options.generatedPosBoxes || [])
+
 
       const useBaseline = options.baseline === true;
       const useMaskSeed =

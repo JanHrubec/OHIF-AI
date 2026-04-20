@@ -639,8 +639,8 @@ const toolbarButtons: Button[] = [
     props: {
       type: 'tool',
       icon: 'icon-labelmap-slice-propagation',
-      label: 'Propagate Mask',
-      tooltip: 'Use current segment as SAM prompts and propagate',
+      label: 'Refine from Mask',
+      tooltip: 'Use current segment mask as SAM seed and refine',
       commands: 'propagateCurrentMask',
     },
   },
