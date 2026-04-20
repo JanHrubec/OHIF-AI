@@ -1135,6 +1135,9 @@ const commandsModule = ({
       const useMaskSeed =
         options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
 
+      const hasPromptInputs =
+        pos_points.length > 0 || neg_points.length > 0 || pos_boxes.length > 0;
+
       let seedMasks: Array<{ slice: number; indices: number[] }> = [];
       if (!useBaseline && !toolboxState.getRefineNew() && useMaskSeed && activeSegmentation) {
         const promptSlices = new Set<number>();
@@ -1159,7 +1162,72 @@ const commandsModule = ({
         const labelmapImageIds =
           activeSegmentation?.representationData?.Labelmap?.imageIds || [];
 
-        for (const slice of promptSlices) {
+        type SliceCandidate = { slice: number; area: number };
+        const nonEmptyCandidates: SliceCandidate[] = [];
+
+        const collectSliceIndices = (scalarData: ArrayLike<number>, value: number): number[] => {
+          const indices: number[] = [];
+          for (let idx = 0; idx < scalarData.length; idx++) {
+            if (scalarData[idx] === value) {
+              indices.push(idx);
+            }
+          }
+          return indices;
+        };
+
+        const sampleTopCandidateSlices = (
+          candidates: SliceCandidate[],
+          maxCandidates: number
+        ): number[] => {
+          return candidates
+            .sort((a, b) => b.area - a.area)
+            .slice(0, maxCandidates)
+            .map(c => c.slice);
+        };
+
+        const requestedSeedSlices = new Set<number>();
+        if (hasPromptInputs) {
+          promptSlices.forEach(s => requestedSeedSlices.add(s));
+        } else {
+          const MAX_AUTO_SEED_CANDIDATES = 16;
+          for (let slice = 0; slice < labelmapImageIds.length; slice++) {
+            const labelmapImage = cache.getImage(labelmapImageIds[slice]);
+            const voxelManager = labelmapImage?.voxelManager as
+              | csTypes.IVoxelManager<number>
+              | undefined;
+            const scalarData = voxelManager?.getScalarData?.();
+            if (!scalarData?.length) {
+              continue;
+            }
+
+            let area = 0;
+            for (let idx = 0; idx < scalarData.length; idx++) {
+              if (scalarData[idx] === segmentNumber) {
+                area++;
+              }
+            }
+            if (area > 0) {
+              nonEmptyCandidates.push({ slice, area });
+            }
+          }
+
+          const candidateSlices = sampleTopCandidateSlices(
+            nonEmptyCandidates,
+            MAX_AUTO_SEED_CANDIDATES
+          );
+          candidateSlices.forEach(s => requestedSeedSlices.add(s));
+
+          if (candidateSlices.length > 0) {
+            uiNotificationService.show({
+              title: 'Mask-seed candidates',
+              message: `Using ${candidateSlices.length} baseline-mask candidate slices to initialize SAM refinement.`,
+              type: 'info',
+              duration: 3500,
+            });
+          }
+        }
+
+        for (const slice of requestedSeedSlices) {
           if (slice < 0 || slice >= labelmapImageIds.length) {
             continue;
           }
@@ -1173,12 +1241,7 @@ const commandsModule = ({
             continue;
           }
 
-          const indices: number[] = [];
-          for (let idx = 0; idx < scalarData.length; idx++) {
-            if (scalarData[idx] === segmentNumber) {
-              indices.push(idx);
-            }
-          }
+          const indices = collectSliceIndices(scalarData, segmentNumber);
 
           if (indices.length > 0) {
             seedMasks.push({ slice, indices });
@@ -1208,10 +1271,11 @@ const commandsModule = ({
         document.dispatchEvent(event);
       }, 200);
 
-      if (!useBaseline && pos_points.length == 0 && neg_points.length == 0 && pos_boxes.length == 0 && text_prompts.length == 0){
+      const hasSeedInputs = seedMasks.length > 0;
+      if (!useBaseline && !hasPromptInputs && !hasSeedInputs && text_prompts.length == 0){
         uiNotificationService.show({
-          title: 'Prompt warning',
-          message: 'Only pos/neg points and bbox are available for SAM2-based models',
+          title: 'Input warning',
+          message: 'Provide prompts or enable mask seed with an active segment to run SAM refinement',
           type: 'warning',
           duration: 4000,
         });
@@ -1221,7 +1285,9 @@ const commandsModule = ({
       if (!useBaseline) {
         uiNotificationService.show({
           title: 'Prompt info',
-          message: 'Only pos/neg points and bbox are accepted for SAM2-based models, other prompt types are ignored',
+          message: hasSeedInputs
+            ? 'SAM refinement uses mask seeds and/or pos-neg-box prompts; other prompt types are ignored'
+            : 'Only pos-neg-box prompts are accepted for SAM2-based models; other prompt types are ignored',
           type: 'info',
           duration: 4000,
         });

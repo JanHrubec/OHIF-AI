@@ -1203,16 +1203,42 @@ class BasicInferTask(InferTask):
             #breakpoint()
             ann_obj_id = 1
             video_segments = {}  # video_segments contains the per-frame segmentation results
-            
-            ann_frame_list = np.array(list(map(lambda x: x[2], result_json['pos_points'])), dtype=np.int16)
-            ann_frame_list_neg = np.array(list(map(lambda x: x[2], result_json['neg_points'])), dtype=np.int16)
-            ann_frame_list = np.unique(np.concatenate((ann_frame_list, ann_frame_list_neg)))
+
+            ann_frame_values = set()
+            for p in result_json["pos_points"]:
+                if len(p) >= 3:
+                    ann_frame_values.add(int(p[2]))
+            for p in result_json["neg_points"]:
+                if len(p) >= 3:
+                    ann_frame_values.add(int(p[2]))
 
             if "pos_boxes" not in result_json:
-                result_json["pos_boxes"] = []            
+                result_json["pos_boxes"] = []
             if len(result_json["pos_boxes"])!=0:
-                ann_frame_list_box = np.array(list(map(lambda x: x[2], [x for xs in result_json["pos_boxes"] for x in xs])), dtype=np.int16)
-                ann_frame_list = np.unique(np.concatenate((ann_frame_list, ann_frame_list_box)))
+                for b in result_json["pos_boxes"]:
+                    for pt in b:
+                        if len(pt) >= 3:
+                            ann_frame_values.add(int(pt[2]))
+
+            if use_mask_seed:
+                ann_frame_values.update(seed_masks_by_slice.keys())
+
+            ann_frame_list = np.array(sorted(ann_frame_values), dtype=np.int16)
+
+            if ann_frame_list.size == 0:
+                logger.warning("No prompt or seed frames available for SAM refinement")
+                pred = np.zeros((len_z, len_y, len_x), dtype=np.uint8)
+                final_result_json["prompt_info"] = result_json
+                final_result_json["sam_elapsed"] = time.time() - start
+                final_result_json["flipped"] = instanceNumber > instanceNumber2
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                if medsam2 == 'medsam2':
+                    final_result_json["label_name"] = f"medsam2_pred_{timestamp}"
+                elif medsam2 == 'sam3':
+                    final_result_json["label_name"] = f"sam3_pred_{timestamp}"
+                else:
+                    final_result_json["label_name"] = f"sam2_pred_{timestamp}"
+                return pred, final_result_json
 
             for i in range(len(ann_frame_list)):
 
@@ -1247,6 +1273,8 @@ class BasicInferTask(InferTask):
                 pos_points = np.array([i[0:2] for i in result_json['pos_points'] if i[2]==value], dtype=np.int16)
                 neg_points = np.array([i[0:2] for i in result_json['neg_points'] if i[2]==value], dtype=np.int16)
                 pre_boxes = np.array([i for i in result_json["pos_boxes"] if i[0][2]==value], dtype=np.int16)
+                seed_obj_ids = None
+                seed_video_res_masks = None
 
                 if use_mask_seed and value in seed_masks_by_slice:
                     flat_indices = seed_masks_by_slice[value]
@@ -1260,19 +1288,29 @@ class BasicInferTask(InferTask):
                             seed_mask[ys, xs] = 1
                             with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
                                 if medsam2 == 'sam3':
-                                    _, _, _, _ = predictor.add_new_mask(
+                                    _, seed_obj_ids, _, seed_video_res_masks = predictor.add_new_mask(
                                         inference_state=inference_state,
                                         frame_idx=ann_frame_idx,
                                         obj_id=ann_obj_id,
                                         mask=torch.from_numpy(seed_mask),
                                     )
                                 else:
-                                    _, _, _ = predictor.add_new_mask(
+                                    _, seed_obj_ids, seed_video_res_masks = predictor.add_new_mask(
                                         inference_state=inference_state,
                                         frame_idx=ann_frame_idx,
                                         obj_id=ann_obj_id,
                                         mask=seed_mask,
                                     )
+
+                has_points = len(pos_points) > 0 or len(neg_points) > 0
+                has_boxes = len(pre_boxes) != 0
+                if not has_points and not has_boxes:
+                    if "one" in data and seed_video_res_masks is not None and seed_obj_ids is not None:
+                        video_segments[ann_frame_idx] = {
+                            out_obj_id: (seed_video_res_masks[i] > 0.0).cpu().numpy()
+                            for i, out_obj_id in enumerate(seed_obj_ids)
+                        }
+                    continue
 
                 if len(neg_points) >0 and len(pos_points) >0:
                     points = np.concatenate((pos_points, neg_points), axis=0)
