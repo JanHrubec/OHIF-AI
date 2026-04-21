@@ -33,6 +33,10 @@ const OPTIONAL_TOOLBOXES: Array<{
 ];
 
 const getPanelModule = ({ commandsManager, servicesManager, extensionManager }: withAppTypes) => {
+  const routerBasename =
+    (((window as any)?.config?.routerBasename as string | null) || '').replace(/\/+$/, '');
+  const withAppBase = (path: string) => `${routerBasename}${path.startsWith('/') ? path : `/${path}`}`;
+
   const OptionalAiToolboxes = () => {
     const [capabilities, setCapabilities] = useState<BackendCapabilities>(DEFAULT_BACKEND_CAPABILITIES);
 
@@ -41,7 +45,7 @@ const getPanelModule = ({ commandsManager, servicesManager, extensionManager }: 
 
       const loadCapabilities = async () => {
         try {
-          const response = await fetch('/monai/info/');
+          const response = await fetch(withAppBase('/monai/info/'));
           if (!response.ok) {
             return;
           }
