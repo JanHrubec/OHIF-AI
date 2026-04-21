@@ -1044,11 +1044,14 @@ const commandsModule = ({
 
 
       const useBaseline = options.baseline === true;
+      const shouldRefineCurrentMask = !useBaseline && !toolboxState.getRefineNew();
       const useMaskSeed =
-        options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
+        shouldRefineCurrentMask
+          ? true
+          : options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
       const hasNegPromptInputs = neg_points.length > 0;
       const preserveExistingSegmentMask =
-        !toolboxState.getRefineNew() && !useBaseline && useMaskSeed && !hasNegPromptInputs;
+        shouldRefineCurrentMask && useMaskSeed && !hasNegPromptInputs;
 
       const hasPromptInputs =
         pos_points.length > 0 || neg_points.length > 0 || pos_boxes.length > 0;
@@ -1311,7 +1314,11 @@ const commandsModule = ({
               }
             }
             
-            if (existingseriesInstanceUid === currentDisplaySets.SeriesInstanceUID) {
+            const canForceRefineOnActiveSegmentation = shouldRefineCurrentMask && useMaskSeed;
+            if (
+              existingseriesInstanceUid === currentDisplaySets.SeriesInstanceUID ||
+              canForceRefineOnActiveSegmentation
+            ) {
               existingSegments = activeSegmentation.segments || {};
               segmentationId = activeSegmentation.segmentationId;
               segImageIds = activeSegmentation.representationData.Labelmap.imageIds;
