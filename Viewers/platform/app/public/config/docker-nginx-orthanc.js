@@ -1,8 +1,6 @@
 /** @type {AppTypes.Config} */
-const inferredBase = window.location.pathname.startsWith('/ohif') ? '/ohif' : '';
-
 window.config = {
-  routerBasename: inferredBase || null,
+  routerBasename: null,
   showStudyList: true,
   extensions: [],
   modes: [],
@@ -32,9 +30,9 @@ window.config = {
       configuration: {
         friendlyName: 'Orthanc Server',
         name: 'Orthanc',
-        wadoUriRoot: `${inferredBase}/wado`,
-        qidoRoot: `${inferredBase}/pacs/dicom-web`,
-        wadoRoot: `${inferredBase}/pacs/dicom-web`,
+        wadoUriRoot: '/wado',
+        qidoRoot: '/pacs/dicom-web',
+        wadoRoot: '/pacs/dicom-web',
         qidoSupportsIncludeField: false,
         imageRendering: 'wadors',
         thumbnailRendering: 'wadors',

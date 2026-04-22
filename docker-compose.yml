@@ -10,6 +10,8 @@ services:
       context: ./Viewers/
       # Relative to context
       dockerfile: ./platform/app/.recipes/Nginx-Orthanc/dockerfile
+      args:
+        PUBLIC_URL: /ohif
     image: webapp:latest
     container_name: ohif_orthanc
     volumes:

@@ -50,14 +50,6 @@ const commandsModule = ({
   commandsManager,
   extensionManager,
 }: Types.Extensions.ExtensionParams): Types.Extensions.CommandsModule => {
-  const routerBasename =
-    (((window as any)?.config?.routerBasename as string | null) || '').replace(/\/+$/, '');
-
-  const withAppBase = (path: string) => {
-    const normalizedPath = path.startsWith('/') ? path : `/${path}`;
-    return `${routerBasename}${normalizedPath}`;
-  };
-
   const {
     customizationService,
     measurementService,
@@ -1211,7 +1203,7 @@ const commandsModule = ({
         });
       }
 
-      let url = withAppBase(`/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`);
+      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params: Record<string, unknown> = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1566,7 +1558,7 @@ const commandsModule = ({
       if(currentDisplaySets === undefined || currentDisplaySets.Modality === "SEG"){
         return;
       }
-      let url = withAppBase(`/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`);
+      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1624,7 +1616,7 @@ const commandsModule = ({
       const currentDisplaySets = displaySets.filter(e => {
         return e.displaySetInstanceUID == displaySetInstanceUID;
       })[0];
-      let url = withAppBase(`/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`);
+      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1681,7 +1673,7 @@ const commandsModule = ({
       const currentDisplaySets = displaySets.filter(e => {
         return e.displaySetInstanceUID == displaySetInstanceUID;
       })[0];
-      let url = withAppBase(`/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`);
+      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1920,7 +1912,7 @@ const commandsModule = ({
         document.dispatchEvent(event);
       }, 200);
 
-      let url = withAppBase(`/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`);
+      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
       //  device: response.data.trainers.segmentation.config.device,
