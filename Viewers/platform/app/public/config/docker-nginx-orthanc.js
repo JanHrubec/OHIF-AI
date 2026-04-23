@@ -1,6 +1,6 @@
 /** @type {AppTypes.Config} */
 window.config = {
-  routerBasename: null,
+  routerBasename: window.location.pathname.startsWith('/ohif') ? '/ohif' : null,
   showStudyList: true,
   extensions: [],
   modes: [],
