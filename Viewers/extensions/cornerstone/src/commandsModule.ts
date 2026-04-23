@@ -117,7 +117,8 @@ function commandsModule({
     const viewportId = viewportGridService.getActiveViewportId();
     const activeSegmentation = segmentationService.getActiveSegmentation(viewportId);
     const segmentationId = activeSegmentation?.segmentationId;
-    const activeSegmentIndex = segmentationService.getActiveSegment(viewportId).segmentIndex;
+    const activeSegment = segmentationService.getActiveSegment(viewportId);
+    const activeSegmentIndex = activeSegment?.segmentIndex;
 
     return {
       segmentationId,
@@ -135,11 +136,31 @@ function commandsModule({
 
       const { segmentationId: targetId, segmentIndex: targetIndex } = targetSegmentation;
 
+      if (!targetId || !targetIndex) {
+        uiNotificationService.show({
+          title: 'Segment Bidirectional',
+          message: 'Select an active segmentation and segment first.',
+          type: 'warning',
+          duration: 4000,
+        });
+        return;
+      }
+
       // Get bidirectional measurement data
       const bidirectionalData = await cstUtils.segmentation.getSegmentLargestBidirectional({
         segmentationId: targetId,
         segmentIndices: [targetIndex],
       });
+
+      if (!bidirectionalData?.length) {
+        uiNotificationService.show({
+          title: 'Segment Bidirectional',
+          message: 'No bidirectional measurement could be computed for the active segment.',
+          type: 'info',
+          duration: 4000,
+        });
+        return;
+      }
 
       const activeViewportId = viewportGridService.getActiveViewportId();
 
@@ -163,10 +184,10 @@ function commandsModule({
         const isVisible = cornerstoneTools.annotation.visibility.isAnnotationVisible(
           annotation.annotationUID
         );
-        if (isVisible) {
+        if (!isVisible) {
           cornerstoneTools.annotation.visibility.setAnnotationVisibility(
             annotation.annotationUID,
-            !isVisible
+            true
           );
         }
         // Update segmentation stats
@@ -197,6 +218,17 @@ function commandsModule({
     },
     interpolateLabelmap: () => {
       const { segmentationId, segmentIndex } = _getActiveSegmentationInfo();
+
+      if (!segmentationId || !segmentIndex) {
+        uiNotificationService.show({
+          title: 'Interpolate Labelmap',
+          message: 'Select an active segmentation and segment first.',
+          type: 'warning',
+          duration: 4000,
+        });
+        return;
+      }
+
       labelmapInterpolation.interpolate({
         segmentationId,
         segmentIndex,
