@@ -1117,7 +1117,10 @@ class BasicInferTask(InferTask):
                     if not isinstance(indices, list) or len(indices) == 0:
                         continue
                     try:
-                        seed_masks_by_slice[slice_idx] = np.asarray(indices, dtype=np.int64)
+                        parsed_indices = np.asarray(indices, dtype=np.int64).reshape(-1)
+                        if parsed_indices.size == 0:
+                            continue
+                        seed_masks_by_slice[slice_idx] = np.unique(parsed_indices)
                     except Exception:
                         continue
             
@@ -1133,6 +1136,27 @@ class BasicInferTask(InferTask):
             dicom_dir = data['image'].split('.nii.gz')[0]
             image_files = glob('{}/*'.format(dicom_dir))
             dcm_img_sample = dcmread(image_files[0], stop_before_pixels=True)
+
+            instanceNumber = None
+            instanceNumber2 = None
+            flipped_order = False
+            try:
+                reader = sitk.ImageSeriesReader()
+                dicom_filenames = reader.GetGDCMSeriesFileNames(dicom_dir)
+                if len(dicom_filenames) >= 2:
+                    dcm_img_sample = dcmread(dicom_filenames[0], stop_before_pixels=True)
+                    dcm_img_sample_2 = dcmread(dicom_filenames[1], stop_before_pixels=True)
+                    if 0x00200013 in dcm_img_sample.keys():
+                        instanceNumber = dcm_img_sample[0x00200013].value
+                    if 0x00200013 in dcm_img_sample_2.keys():
+                        instanceNumber2 = dcm_img_sample_2[0x00200013].value
+                    if instanceNumber is not None and instanceNumber2 is not None:
+                        flipped_order = instanceNumber > instanceNumber2
+            except Exception:
+                logger.warning("Failed to infer DICOM slice order; falling back to default frame order")
+
+            logger.info(f"Prompt First InstanceNumber: {instanceNumber}")
+            logger.info(f"Prompt Second InstanceNumber: {instanceNumber2}")
 
             if contrast_window != None and contrast_center !=None:
                 # Check for cats and remote controls
@@ -1207,10 +1231,14 @@ class BasicInferTask(InferTask):
             ann_frame_values = set()
             for p in result_json["pos_points"]:
                 if len(p) >= 3:
-                    ann_frame_values.add(int(p[2]))
+                    frame_idx = int(p[2])
+                    if 0 <= frame_idx < len_z:
+                        ann_frame_values.add(frame_idx)
             for p in result_json["neg_points"]:
                 if len(p) >= 3:
-                    ann_frame_values.add(int(p[2]))
+                    frame_idx = int(p[2])
+                    if 0 <= frame_idx < len_z:
+                        ann_frame_values.add(frame_idx)
 
             if "pos_boxes" not in result_json:
                 result_json["pos_boxes"] = []
@@ -1218,10 +1246,14 @@ class BasicInferTask(InferTask):
                 for b in result_json["pos_boxes"]:
                     for pt in b:
                         if len(pt) >= 3:
-                            ann_frame_values.add(int(pt[2]))
+                            frame_idx = int(pt[2])
+                            if 0 <= frame_idx < len_z:
+                                ann_frame_values.add(frame_idx)
 
             if use_mask_seed:
-                ann_frame_values.update(seed_masks_by_slice.keys())
+                ann_frame_values.update(
+                    [slice_idx for slice_idx in seed_masks_by_slice.keys() if 0 <= slice_idx < len_z]
+                )
 
             ann_frame_list = np.array(sorted(ann_frame_values), dtype=np.int16)
 
@@ -1230,7 +1262,7 @@ class BasicInferTask(InferTask):
                 pred = np.zeros((len_z, len_y, len_x), dtype=np.uint8)
                 final_result_json["prompt_info"] = result_json
                 final_result_json["sam_elapsed"] = time.time() - start
-                final_result_json["flipped"] = instanceNumber > instanceNumber2
+                final_result_json["flipped"] = flipped_order
                 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
                 if medsam2 == 'medsam2':
                     final_result_json["label_name"] = f"medsam2_pred_{timestamp}"
@@ -1241,25 +1273,9 @@ class BasicInferTask(InferTask):
                 return pred, final_result_json
 
             for i in range(len(ann_frame_list)):
-
-                reader = sitk.ImageSeriesReader()
-                dicom_filenames = reader.GetGDCMSeriesFileNames(dicom_dir)
-                dcm_img_sample = dcmread(dicom_filenames[0], stop_before_pixels=True)
-                dcm_img_sample_2 = dcmread(dicom_filenames[1], stop_before_pixels=True)
-                
-                instanceNumber = None
-                instanceNumber2 = None
-
-                if 0x00200013 in dcm_img_sample.keys():
-                    instanceNumber = dcm_img_sample[0x00200013].value
-                logger.info(f"Prompt First InstanceNumber: {instanceNumber}")
-                if 0x00200013 in dcm_img_sample_2.keys():
-                    instanceNumber2 = dcm_img_sample_2[0x00200013].value
-                logger.info(f"Prompt Second InstanceNumber: {instanceNumber2}")
-
-                if instanceNumber < instanceNumber2:
+                if not flipped_order:
                     ann_frame_idx = ann_frame_list[i]
-                else:    
+                else:
                     ann_frame_idx = len_z-1-ann_frame_list[i]
             
             #ann_frame_idx = len_z-1-data['pos_points'][0][2]  # the frame index we interact with 

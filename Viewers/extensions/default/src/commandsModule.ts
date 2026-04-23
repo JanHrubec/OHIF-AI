@@ -923,6 +923,15 @@ const commandsModule = ({
       const segs = servicesManager.services.segmentationService.getSegmentations()
       const { activeViewportId, viewports } = viewportGridService.getState();
       const activeViewportSpecificData = viewports.get(activeViewportId);
+      if (!activeViewportSpecificData) {
+        uiNotificationService.show({
+          title: 'SAM refinement',
+          message: 'No active viewport found.',
+          type: 'warning',
+          duration: 3000,
+        });
+        return;
+      }
 
       const { setViewportGridState } = useViewportGridStore.getState();
       const currentImageIdIndex = servicesManager.services.cornerstoneViewportService.getCornerstoneViewport(activeViewportId).getCurrentImageIdIndex();
@@ -934,6 +943,15 @@ const commandsModule = ({
       const currentDisplaySets = displaySets.filter(e => {
         return e.displaySetInstanceUID == displaySetInstanceUID;
       })[0];
+      if (!currentDisplaySets) {
+        uiNotificationService.show({
+          title: 'SAM refinement',
+          message: 'No active image series found for the viewport.',
+          type: 'warning',
+          duration: 3000,
+        });
+        return;
+      }
 
       const currentMeasurements = measurementService.getMeasurements()
 
@@ -1071,6 +1089,15 @@ const commandsModule = ({
 
         const labelmapImageIds =
           activeSegmentation?.representationData?.Labelmap?.imageIds || [];
+
+        if (labelmapImageIds.length === 0) {
+          uiNotificationService.show({
+            title: 'Mask-seed warning',
+            message: 'Active segmentation has no labelmap slices; cannot extract mask seeds.',
+            type: 'warning',
+            duration: 4000,
+          });
+        }
 
         type SliceCandidate = { slice: number; area: number };
         const nonEmptyCandidates: SliceCandidate[] = [];

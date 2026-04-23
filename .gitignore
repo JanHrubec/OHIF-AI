@@ -16,6 +16,7 @@ Viewers/platform/ui-next/node_modules/
 
 # Secrets
 Viewers/platform/app/.recipes/Nginx-Orthanc/config/.htpasswd
+.github/copilot-instructions.md
 
 # Output
 Viewers/build
