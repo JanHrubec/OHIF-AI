@@ -1106,18 +1106,16 @@ const commandsModule = ({
         shouldRefineCurrentMask
           ? true
           : options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
-      const hasNegPromptInputs =
-        neg_points.length > 0 ||
-        neg_boxes.length > 0 ||
-        neg_lassos.length > 0 ||
-        neg_scribbles.length > 0;
+      const hasNegPromptInputs = neg_points.length > 0;
       const preserveExistingSegmentMask =
         shouldRefineCurrentMask && useMaskSeed && !hasNegPromptInputs;
 
-      const hasPromptInputs =
+      const hasSupportedSamPromptInputs =
         pos_points.length > 0 ||
         neg_points.length > 0 ||
-        pos_boxes.length > 0 ||
+        pos_boxes.length > 0;
+
+      const hasUnsupportedSamPromptInputs =
         neg_boxes.length > 0 ||
         pos_lassos.length > 0 ||
         neg_lassos.length > 0 ||
@@ -1144,30 +1142,6 @@ const commandsModule = ({
             }
           });
         });
-        neg_boxes.forEach(box => {
-          box?.forEach(point => {
-            if (Number.isFinite(point?.[2])) {
-              promptSlices.add(point[2]);
-            }
-          });
-        });
-        const collectPromptPolylineSlices = (polylines: any[]) => {
-          polylines.forEach(polyline => {
-            if (!Array.isArray(polyline)) {
-              return;
-            }
-            polyline.forEach(point => {
-              if (Number.isFinite(point?.[2])) {
-                promptSlices.add(point[2]);
-              }
-            });
-          });
-        };
-        collectPromptPolylineSlices(pos_lassos as any[]);
-        collectPromptPolylineSlices(neg_lassos as any[]);
-        collectPromptPolylineSlices(pos_scribbles as any[]);
-        collectPromptPolylineSlices(neg_scribbles as any[]);
-
         const labelmapImageIds =
           activeSegmentation?.representationData?.Labelmap?.imageIds || [];
 
@@ -1204,7 +1178,7 @@ const commandsModule = ({
         };
 
         const requestedSeedSlices = new Set<number>();
-        if (hasPromptInputs) {
+        if (hasSupportedSamPromptInputs) {
           promptSlices.forEach(s => requestedSeedSlices.add(s));
         } else {
           const MAX_AUTO_SEED_CANDIDATES = 16;
@@ -1290,22 +1264,31 @@ const commandsModule = ({
       }, 200);
 
       const hasSeedInputs = seedMasks.length > 0;
-      if (!useBaseline && !hasPromptInputs && !hasSeedInputs && text_prompts.length == 0){
+      if (!useBaseline && !hasSupportedSamPromptInputs && !hasSeedInputs && text_prompts.length == 0){
         uiNotificationService.show({
           title: 'Input warning',
-          message: 'Provide prompts or enable mask seed with an active segment to run SAM refinement',
+          message: 'Provide point/positive-box prompts or enable mask seed with an active segment to run SAM refinement',
           type: 'warning',
           duration: 4000,
         });
         return;
       }
 
+      if (!useBaseline && hasUnsupportedSamPromptInputs) {
+        uiNotificationService.show({
+          title: 'Unsupported SAM prompts',
+          message: 'Negative boxes, lassos, and scribbles are not supported by SAM inference and will be ignored.',
+          type: 'warning',
+          duration: 5000,
+        });
+      }
+
       if (!useBaseline) {
         uiNotificationService.show({
           title: 'Prompt info',
           message: hasSeedInputs
-            ? 'SAM refinement uses mask seeds and all prompt tools (points, boxes, lassos, scribbles).'
-            : 'SAM refinement uses all prompt tools (points, boxes, lassos, scribbles).',
+            ? 'SAM refinement uses mask seeds plus supported SAM prompts (points and positive boxes).'
+            : 'SAM refinement uses supported SAM prompts (points and positive boxes).',
           type: 'info',
           duration: 4000,
         });
@@ -1322,11 +1305,11 @@ const commandsModule = ({
         pos_points: pos_points,
         neg_points: neg_points,
         pos_boxes: pos_boxes,
-        neg_boxes: neg_boxes,
-        pos_lassos: pos_lassos,
-        neg_lassos: neg_lassos,
-        pos_scribbles: pos_scribbles,
-        neg_scribbles: neg_scribbles,
+        neg_boxes: [],
+        pos_lassos: [],
+        neg_lassos: [],
+        pos_scribbles: [],
+        neg_scribbles: [],
         texts: text_prompts,
         nninter: false,
         medsam2: medsam2,
