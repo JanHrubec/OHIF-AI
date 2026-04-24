@@ -476,7 +476,7 @@ class BasicInferTask(InferTask):
         reader = sitk.ImageSeriesReader()
         dicom_filenames = reader.GetGDCMSeriesFileNames(dicom_dir)
         dcm_img_sample = dcmread(dicom_filenames[0], stop_before_pixels=True)
-        dcm_img_sample_2 = dcmread(dicom_filenames[1], stop_before_pixels=True)
+        dcm_img_sample_2 = dcmread(dicom_filenames[1], stop_before_pixels=True) if len(dicom_filenames) > 1 else dcm_img_sample
         
         instanceNumber = None
         instanceNumber2 = None
@@ -487,6 +487,11 @@ class BasicInferTask(InferTask):
         if 0x00200013 in dcm_img_sample_2.keys():
             instanceNumber2 = dcm_img_sample_2[0x00200013].value
         logger.info(f"Prompt Second InstanceNumber: {instanceNumber2}")
+        is_flipped = (
+            instanceNumber is not None
+            and instanceNumber2 is not None
+            and instanceNumber > instanceNumber2
+        )
 
         contrast_center = None
         contrast_window = None
@@ -593,10 +598,7 @@ class BasicInferTask(InferTask):
             }
             final_result_json["sam_elapsed"] = elapsed
 
-            if instanceNumber > instanceNumber2:
-                final_result_json["flipped"] = True
-            else:
-                final_result_json["flipped"] = False
+            final_result_json["flipped"] = is_flipped
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             final_result_json["label_name"] = f"baseline_pred_{timestamp}"
@@ -669,7 +671,7 @@ class BasicInferTask(InferTask):
                         logger.info(f"Using all slices: 1 to {num_axial_slices} (1-indexed)")
                     
                     # Reverse slice indices if instanceNumber > instanceNumber2
-                    if instanceNumber is not None and instanceNumber2 is not None and instanceNumber > instanceNumber2:
+                    if is_flipped:
                         slice_indices = [num_axial_slices - 1 - idx for idx in slice_indices]
                         logger.info(f"Reversed slice indices due to instanceNumber > instanceNumber2: {slice_indices}")
                     
@@ -780,10 +782,7 @@ class BasicInferTask(InferTask):
                 final_result_json["prompt_info"] = result_json
                 final_result_json["voxtell_elapsed"] = voxtell_elapsed
 
-                if instanceNumber > instanceNumber2:
-                    final_result_json["flipped"] = True
-                else:
-                    final_result_json["flipped"] = False
+                final_result_json["flipped"] = is_flipped
 
                 timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
                 final_result_json["label_name"] = data['texts'][0]
@@ -850,7 +849,7 @@ class BasicInferTask(InferTask):
                 for point in data['pos_points']:
                     if not self.is_prompt_used(point, "pos_points"):
                         self.add_prompt(point, "pos_points")
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             point[2]=img_np.shape[1]-1-point[2]
                         if not _safe_interaction(lambda: session.add_point_interaction(tuple(point[::-1]), include_interaction=True)):
                             return f'/code/predictions/reset.nii.gz', final_result_json
@@ -862,7 +861,7 @@ class BasicInferTask(InferTask):
                 for point in data['neg_points']:
                     if not self.is_prompt_used(point, "neg_points"):
                         self.add_prompt(point, "neg_points")
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             point[2]=img_np.shape[1]-1-point[2]
                         if not _safe_interaction(lambda: session.add_point_interaction(tuple(point[::-1]), include_interaction=False)):
                             return f'/code/predictions/reset.nii.gz', final_result_json
@@ -874,7 +873,7 @@ class BasicInferTask(InferTask):
                 for box in data['pos_boxes']:
                     if not self.is_prompt_used(box, "pos_boxes"):
                         self.add_prompt(box, "pos_boxes")
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             box[0][2]=img_np.shape[1]-1-box[0][2]
                             box[1][2]=img_np.shape[1]-1-box[1][2]
                         box[0]=box[0][::-1]
@@ -892,7 +891,7 @@ class BasicInferTask(InferTask):
                 for box in data['neg_boxes']:
                     if not self.is_prompt_used(box, "neg_boxes"):
                         self.add_prompt(box, "neg_boxes")
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             box[0][2]=img_np.shape[1]-1-box[0][2]
                             box[1][2]=img_np.shape[1]-1-box[1][2]
                         box[0]=box[0][::-1]
@@ -915,7 +914,7 @@ class BasicInferTask(InferTask):
                         lassoMask = np.zeros(img_np.shape[1:], dtype=np.uint8)
                         
                         filled_indices = np.asarray(lasso)
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             filled_indices[:, 2]=img_np.shape[1]-1 - filled_indices[:, 2]
                         x, y, z = filled_indices[:, 0], filled_indices[:, 1], filled_indices[:, 2]
                         valid = (
@@ -938,7 +937,7 @@ class BasicInferTask(InferTask):
                         lasso = get_scanline_filled_points_3d(clean_and_densify_polyline(lasso))
                         lassoMask = np.zeros(img_np.shape[1:], dtype=np.uint8)
                         filled_indices = np.asarray(lasso)
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             filled_indices[:, 2]=img_np.shape[1]-1 - filled_indices[:, 2]
                         x, y, z = filled_indices[:, 0], filled_indices[:, 1], filled_indices[:, 2]
                         valid = (
@@ -963,7 +962,7 @@ class BasicInferTask(InferTask):
 
                         filled_indices = np.round(np.asarray(scribble)).astype(int)
 
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             filled_indices[:, 2]=img_np.shape[1]-1 -filled_indices[:, 2]
                         
                         # Sphere of radius 1
@@ -1009,7 +1008,7 @@ class BasicInferTask(InferTask):
 
                         #logger.info(f"filled_indices: {filled_indices}")
                         #logger.info(f"filled_indices shape: {filled_indices.shape}")
-                        if instanceNumber > instanceNumber2:
+                        if is_flipped:
                             filled_indices[:, 2]=img_np.shape[1]-1 -filled_indices[:, 2]
                         
                         # Sphere of radius 1
@@ -1059,10 +1058,7 @@ class BasicInferTask(InferTask):
             final_result_json["prompt_info"] = result_json
             final_result_json["nninter_elapsed"] = nninter_elapsed
 
-            if instanceNumber > instanceNumber2:
-                final_result_json["flipped"] = True
-            else:
-                final_result_json["flipped"] = False
+            final_result_json["flipped"] = is_flipped
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             final_result_json["label_name"] = f"nninter_pred_{timestamp}"
@@ -1420,10 +1416,7 @@ class BasicInferTask(InferTask):
             final_result_json["prompt_info"] = result_json
             final_result_json["sam_elapsed"] = sam_elapsed
             
-            if instanceNumber > instanceNumber2:
-                final_result_json["flipped"] = True
-            else:
-                final_result_json["flipped"] = False
+            final_result_json["flipped"] = flipped_order
 
             timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
             if medsam2 == 'medsam2':

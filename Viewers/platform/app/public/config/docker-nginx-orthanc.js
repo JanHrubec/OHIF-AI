@@ -1,6 +1,9 @@
 /** @type {AppTypes.Config} */
+const isOhifDeployment = window.location.pathname.startsWith('/ohif');
+const appBasePath = isOhifDeployment ? '/ohif' : '';
+
 window.config = {
-  routerBasename: window.location.pathname.startsWith('/ohif') ? '/ohif' : null,
+  routerBasename: isOhifDeployment ? '/ohif' : null,
   showStudyList: true,
   extensions: [],
   modes: [],
@@ -30,9 +33,9 @@ window.config = {
       configuration: {
         friendlyName: 'Orthanc Server',
         name: 'Orthanc',
-        wadoUriRoot: '/ohif/pacs/wado',
-        qidoRoot: '/ohif/pacs/dicom-web',
-        wadoRoot: '/ohif/pacs/dicom-web',
+        wadoUriRoot: `${appBasePath}/pacs/wado`,
+        qidoRoot: `${appBasePath}/pacs/dicom-web`,
+        wadoRoot: `${appBasePath}/pacs/dicom-web`,
         qidoSupportsIncludeField: false,
         imageRendering: 'wadors',
         thumbnailRendering: 'wadors',
