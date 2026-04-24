@@ -41,9 +41,6 @@ services:
       # Persist data
       - ${PERSIST_ROOT:-/mnt/checkpoints/ohif-ai}/orthanc/db:/var/lib/orthanc/db/
     restart: unless-stopped
-    ports:
-      - '5242:4242' # Orthanc REST API (host:container)
-      - '9042:8042' # Orthanc HTTP (host:container)
   
   monai_sam2:
     pull_policy: never
