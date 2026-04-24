@@ -1087,6 +1087,82 @@ class BasicInferTask(InferTask):
             result_json["pos_points"]=copy.deepcopy(data["pos_points"])
             result_json["neg_points"]=copy.deepcopy(data["neg_points"])
             result_json["pos_boxes"]=copy.deepcopy(data["pos_boxes"])
+            result_json["neg_boxes"]=copy.deepcopy(data.get("neg_boxes", []))
+            result_json["pos_lassos"]=copy.deepcopy(data.get("pos_lassos", []))
+            result_json["neg_lassos"]=copy.deepcopy(data.get("neg_lassos", []))
+            result_json["pos_scribbles"]=copy.deepcopy(data.get("pos_scribbles", []))
+            result_json["neg_scribbles"]=copy.deepcopy(data.get("neg_scribbles", []))
+
+            def _polyline_points_for_slice(polylines, slice_idx: int, max_points: int = 32):
+                sampled = []
+                if not isinstance(polylines, list):
+                    return np.empty((0, 2), dtype=np.int16)
+
+                for poly in polylines:
+                    try:
+                        pts = np.asarray(poly, dtype=np.float32)
+                    except Exception:
+                        continue
+
+                    if pts.ndim != 2 or pts.shape[1] < 3:
+                        continue
+
+                    z = np.rint(pts[:, 2]).astype(np.int64)
+                    same_slice = pts[z == int(slice_idx), :2]
+                    if same_slice.size == 0:
+                        continue
+
+                    if same_slice.shape[0] > max_points:
+                        pick = np.linspace(0, same_slice.shape[0] - 1, max_points, dtype=np.int64)
+                        same_slice = same_slice[pick]
+
+                    sampled.extend(np.rint(same_slice).astype(np.int16).tolist())
+
+                if len(sampled) == 0:
+                    return np.empty((0, 2), dtype=np.int16)
+
+                return np.asarray(sampled, dtype=np.int16)
+
+            def _negative_box_points_for_slice(neg_boxes, slice_idx: int):
+                sampled = []
+                if not isinstance(neg_boxes, list):
+                    return np.empty((0, 2), dtype=np.int16)
+
+                for box in neg_boxes:
+                    if not isinstance(box, list) or len(box) < 2:
+                        continue
+                    p0 = box[0]
+                    p1 = box[1]
+                    if len(p0) < 3 or len(p1) < 3:
+                        continue
+
+                    try:
+                        z0 = int(round(float(p0[2])))
+                        z1 = int(round(float(p1[2])))
+                    except Exception:
+                        continue
+
+                    if z0 != int(slice_idx) and z1 != int(slice_idx):
+                        continue
+
+                    x0, y0 = int(round(float(p0[0]))), int(round(float(p0[1])))
+                    x1, y1 = int(round(float(p1[0]))), int(round(float(p1[1])))
+                    xmin, xmax = min(x0, x1), max(x0, x1)
+                    ymin, ymax = min(y0, y1), max(y0, y1)
+                    xc, yc = (xmin + xmax) // 2, (ymin + ymax) // 2
+
+                    sampled.extend([
+                        [xmin, ymin],
+                        [xmin, ymax],
+                        [xmax, ymin],
+                        [xmax, ymax],
+                        [xc, yc],
+                    ])
+
+                if len(sampled) == 0:
+                    return np.empty((0, 2), dtype=np.int16)
+
+                return np.asarray(sampled, dtype=np.int16)
 
             use_mask_seed = str(data.get("use_mask_seed", "false")).strip().lower() in ("1", "true", "yes", "on")
             seed_masks_raw = data.get("seed_masks", [])
@@ -1246,6 +1322,23 @@ class BasicInferTask(InferTask):
                             if 0 <= frame_idx < len_z:
                                 ann_frame_values.add(frame_idx)
 
+            for b in result_json.get("neg_boxes", []):
+                if isinstance(b, list):
+                    for pt in b:
+                        if len(pt) >= 3:
+                            frame_idx = int(pt[2])
+                            if 0 <= frame_idx < len_z:
+                                ann_frame_values.add(frame_idx)
+
+            for key in ["pos_lassos", "neg_lassos", "pos_scribbles", "neg_scribbles"]:
+                for poly in result_json.get(key, []):
+                    if isinstance(poly, list):
+                        for pt in poly:
+                            if len(pt) >= 3:
+                                frame_idx = int(pt[2])
+                                if 0 <= frame_idx < len_z:
+                                    ann_frame_values.add(frame_idx)
+
             if use_mask_seed:
                 ann_frame_values.update(
                     [slice_idx for slice_idx in seed_masks_by_slice.keys() if 0 <= slice_idx < len_z]
@@ -1285,6 +1378,24 @@ class BasicInferTask(InferTask):
                 pos_points = np.array([i[0:2] for i in result_json['pos_points'] if i[2]==value], dtype=np.int16)
                 neg_points = np.array([i[0:2] for i in result_json['neg_points'] if i[2]==value], dtype=np.int16)
                 pre_boxes = np.array([i for i in result_json["pos_boxes"] if i[0][2]==value], dtype=np.int16)
+
+                pos_lasso_points = _polyline_points_for_slice(result_json.get("pos_lassos", []), int(value))
+                neg_lasso_points = _polyline_points_for_slice(result_json.get("neg_lassos", []), int(value))
+                pos_scribble_points = _polyline_points_for_slice(result_json.get("pos_scribbles", []), int(value))
+                neg_scribble_points = _polyline_points_for_slice(result_json.get("neg_scribbles", []), int(value))
+                neg_box_points = _negative_box_points_for_slice(result_json.get("neg_boxes", []), int(value))
+
+                if pos_lasso_points.size > 0:
+                    pos_points = np.concatenate((pos_points, pos_lasso_points), axis=0) if pos_points.size > 0 else pos_lasso_points
+                if pos_scribble_points.size > 0:
+                    pos_points = np.concatenate((pos_points, pos_scribble_points), axis=0) if pos_points.size > 0 else pos_scribble_points
+                if neg_lasso_points.size > 0:
+                    neg_points = np.concatenate((neg_points, neg_lasso_points), axis=0) if neg_points.size > 0 else neg_lasso_points
+                if neg_scribble_points.size > 0:
+                    neg_points = np.concatenate((neg_points, neg_scribble_points), axis=0) if neg_points.size > 0 else neg_scribble_points
+                if neg_box_points.size > 0:
+                    neg_points = np.concatenate((neg_points, neg_box_points), axis=0) if neg_points.size > 0 else neg_box_points
+
                 seed_obj_ids = None
                 seed_video_res_masks = None
 
@@ -1401,10 +1512,18 @@ class BasicInferTask(InferTask):
                                 for i, out_obj_id in enumerate(out_obj_ids)
                             }
 
-            pred = np.zeros((len_z, len_y, len_x))
+            pred = np.zeros((len_z, len_y, len_x), dtype=np.uint8)
 
-            for i in video_segments.keys():
-                pred[i]=video_segments[i][1][0].astype(int)
+            for frame_idx, frame_segments in video_segments.items():
+                if not frame_segments:
+                    continue
+                first_mask = next(iter(frame_segments.values()))
+                mask = np.asarray(first_mask)
+                if mask.ndim == 3:
+                    mask = mask[0]
+                if mask.ndim != 2:
+                    continue
+                pred[frame_idx] = (mask > 0).astype(np.uint8)
             #pred_itk = sitk.GetImageFromArray(pred)
             #pred_itk.CopyInformation(img)
             #pred_itk = sitk.Cast(pred_itk, sitk.sitkUInt8)

@@ -1054,6 +1054,51 @@ const commandsModule = ({
         })
         .map(e => { return [e.at(0).pointIJK, e.at(-1).pointIJK] })
 
+      const neg_boxes = currentMeasurements
+        .filter(e => {
+          return e.toolName === 'RectangleROI2' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === true && e.metadata.SegmentNumber === segmentNumber;
+        })
+        .map(e => {
+          return Object.values(e.data)[0].pointsInShape
+        })
+        .map(e => { return [e.at(0).pointIJK, e.at(-1).pointIJK] })
+
+      const pos_lassos = currentMeasurements
+        .filter(e => {
+          return e.toolName === 'PlanarFreehandROI3' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === false && e.metadata.SegmentNumber === segmentNumber;
+        })
+        .map(e => {
+          return Object.values(e.data)[0]?.boundary
+        })
+        .filter(Boolean)
+
+      const neg_lassos = currentMeasurements
+        .filter(e => {
+          return e.toolName === 'PlanarFreehandROI3' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === true && e.metadata.SegmentNumber === segmentNumber;
+        })
+        .map(e => {
+          return Object.values(e.data)[0]?.boundary
+        })
+        .filter(Boolean)
+
+      const pos_scribbles = currentMeasurements
+        .filter(e => {
+          return e.toolName === 'PlanarFreehandROI2' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === false && e.metadata.SegmentNumber === segmentNumber;
+        })
+        .map(e => {
+          return Object.values(e.data)[0]?.scribble
+        })
+        .filter(Boolean)
+
+      const neg_scribbles = currentMeasurements
+        .filter(e => {
+          return e.toolName === 'PlanarFreehandROI2' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === true && e.metadata.SegmentNumber === segmentNumber;
+        })
+        .map(e => {
+          return Object.values(e.data)[0]?.scribble
+        })
+        .filter(Boolean)
+
 
       const useBaseline = options.baseline === true;
       const shouldRefineCurrentMask = !useBaseline && !toolboxState.getRefineNew();
@@ -1061,12 +1106,23 @@ const commandsModule = ({
         shouldRefineCurrentMask
           ? true
           : options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
-      const hasNegPromptInputs = neg_points.length > 0;
+      const hasNegPromptInputs =
+        neg_points.length > 0 ||
+        neg_boxes.length > 0 ||
+        neg_lassos.length > 0 ||
+        neg_scribbles.length > 0;
       const preserveExistingSegmentMask =
         shouldRefineCurrentMask && useMaskSeed && !hasNegPromptInputs;
 
       const hasPromptInputs =
-        pos_points.length > 0 || neg_points.length > 0 || pos_boxes.length > 0;
+        pos_points.length > 0 ||
+        neg_points.length > 0 ||
+        pos_boxes.length > 0 ||
+        neg_boxes.length > 0 ||
+        pos_lassos.length > 0 ||
+        neg_lassos.length > 0 ||
+        pos_scribbles.length > 0 ||
+        neg_scribbles.length > 0;
 
       let seedMasks: Array<{ slice: number; indices: number[] }> = [];
       if (!useBaseline && !toolboxState.getRefineNew() && useMaskSeed && activeSegmentation) {
@@ -1088,6 +1144,29 @@ const commandsModule = ({
             }
           });
         });
+        neg_boxes.forEach(box => {
+          box?.forEach(point => {
+            if (Number.isFinite(point?.[2])) {
+              promptSlices.add(point[2]);
+            }
+          });
+        });
+        const collectPromptPolylineSlices = (polylines: any[]) => {
+          polylines.forEach(polyline => {
+            if (!Array.isArray(polyline)) {
+              return;
+            }
+            polyline.forEach(point => {
+              if (Number.isFinite(point?.[2])) {
+                promptSlices.add(point[2]);
+              }
+            });
+          });
+        };
+        collectPromptPolylineSlices(pos_lassos as any[]);
+        collectPromptPolylineSlices(neg_lassos as any[]);
+        collectPromptPolylineSlices(pos_scribbles as any[]);
+        collectPromptPolylineSlices(neg_scribbles as any[]);
 
         const labelmapImageIds =
           activeSegmentation?.representationData?.Labelmap?.imageIds || [];
@@ -1225,8 +1304,8 @@ const commandsModule = ({
         uiNotificationService.show({
           title: 'Prompt info',
           message: hasSeedInputs
-            ? 'SAM refinement uses mask seeds and/or pos-neg-box prompts; other prompt types are ignored'
-            : 'Only pos-neg-box prompts are accepted for SAM2-based models; other prompt types are ignored',
+            ? 'SAM refinement uses mask seeds and all prompt tools (points, boxes, lassos, scribbles).'
+            : 'SAM refinement uses all prompt tools (points, boxes, lassos, scribbles).',
           type: 'info',
           duration: 4000,
         });
@@ -1243,6 +1322,11 @@ const commandsModule = ({
         pos_points: pos_points,
         neg_points: neg_points,
         pos_boxes: pos_boxes,
+        neg_boxes: neg_boxes,
+        pos_lassos: pos_lassos,
+        neg_lassos: neg_lassos,
+        pos_scribbles: pos_scribbles,
+        neg_scribbles: neg_scribbles,
         texts: text_prompts,
         nninter: false,
         medsam2: medsam2,
