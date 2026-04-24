@@ -41,7 +41,10 @@ const getPanelModule = ({ commandsManager, servicesManager, extensionManager }: 
 
       const loadCapabilities = async () => {
         try {
-          const response = await fetch('/monai/info/');
+          const monaiInfoUrl = window.location.pathname.startsWith('/ohif')
+            ? '/ohif/monai/info/'
+            : '/monai/info/';
+          const response = await fetch(monaiInfoUrl);
           if (!response.ok) {
             return;
           }

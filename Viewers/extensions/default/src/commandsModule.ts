@@ -60,6 +60,8 @@ const commandsModule = ({
     multiMonitorService,
   } = servicesManager.services;
 
+  const monaiBasePath = window.location.pathname.startsWith('/ohif') ? '/ohif/monai' : '/monai';
+
   // Listen for measurement added events to trigger nninter() when live mode is enabled
   measurementService.subscribe(
     measurementService.EVENTS.MEASUREMENT_ADDED,
@@ -1230,7 +1232,7 @@ const commandsModule = ({
         });
       }
 
-      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
+      let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params: Record<string, unknown> = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1585,7 +1587,7 @@ const commandsModule = ({
       if(currentDisplaySets === undefined || currentDisplaySets.Modality === "SEG"){
         return;
       }
-      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
+      let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1643,7 +1645,7 @@ const commandsModule = ({
       const currentDisplaySets = displaySets.filter(e => {
         return e.displaySetInstanceUID == displaySetInstanceUID;
       })[0];
-      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
+      let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1700,7 +1702,7 @@ const commandsModule = ({
       const currentDisplaySets = displaySets.filter(e => {
         return e.displaySetInstanceUID == displaySetInstanceUID;
       })[0];
-      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
+      let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
         result_extension: '.nii.gz',
@@ -1939,7 +1941,7 @@ const commandsModule = ({
         document.dispatchEvent(event);
       }, 200);
 
-      let url = `/monai/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
+      let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
         largest_cc: false,
       //  device: response.data.trainers.segmentation.config.device,
