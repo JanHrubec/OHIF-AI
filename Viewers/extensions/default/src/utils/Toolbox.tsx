@@ -446,7 +446,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
               {isPorosityToolbox && (
                 <div className="flex flex-wrap items-end gap-2 py-2 px-1 text-xs">
                    <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-sigma" title="Gaussian smoothing before thresholding">Sigma</Label>
+                     <Label htmlFor="baseline-sigma" title="Gaussian smoothing (range 0-10, step 0.1). Higher values smooth noise but can erase small pores; lower values preserve fine pores and edges.">Sigma</Label>
                      <Input
                        id="baseline-sigma"
                        className="w-[68px] h-8 text-xs"
@@ -454,7 +454,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        min={0}
                        max={10}
                        step={0.1}
-                       title="Higher = smoother, lower sensitivity to tiny pores"
+                       title="Gaussian smoothing (range 0-10, step 0.1). Try 0.4-0.8 for small pores, 1.0-2.0 for noisy scans."
                        value={baselineSigma}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -467,7 +467,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                      />
                    </div>
                    <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-clip" title="Upper intensity clipping quantile">Clip</Label>
+                     <Label htmlFor="baseline-clip" title="Upper intensity clip quantile (range 0.5-1.0, step 0.01). Lower values clip bright outliers more aggressively, improving dark-pore contrast; very low values may over-compress intensities.">Clip</Label>
                      <Input
                        id="baseline-clip"
                        className="w-[68px] h-8 text-xs"
@@ -475,7 +475,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        min={0.5}
                        max={1}
                        step={0.01}
-                       title="Lower values boost contrast in darker regions"
+                       title="Upper clip quantile (0.5-1.0). Typical 0.90-0.99; lower increases pore contrast, higher keeps original intensity spread."
                        value={baselineClipQuantile}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -488,7 +488,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                      />
                    </div>
                    <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-threshold-scale" title="Multiplier for Otsu threshold">Thresh</Label>
+                     <Label htmlFor="baseline-threshold-scale" title="Multiplier on Otsu threshold (range 0.5-2.0, step 0.05). Lower values classify more voxels as pores (higher sensitivity); higher values are stricter and reduce false positives.">Thresh</Label>
                      <Input
                        id="baseline-threshold-scale"
                        className="w-[68px] h-8 text-xs"
@@ -496,7 +496,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        min={0.5}
                        max={2}
                        step={0.05}
-                       title="Higher = more sensitive to subtle dark pores"
+                       title="Threshold scale (0.5-2.0). Try 0.70-0.95 to catch weak pores; increase toward 1.1-1.4 to suppress over-segmentation."
                        value={baselineThresholdScale}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -509,14 +509,14 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                      />
                    </div>
                    <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-min-size" title="Minimum connected-component size in voxels">MinPx</Label>
+                     <Label htmlFor="baseline-min-size" title="Minimum connected-component size in voxels (min 0, step 10). Removes small isolated pore candidates after thresholding; raise to suppress salt-and-pepper noise.">MinPx</Label>
                      <Input
                        id="baseline-min-size"
                        className="w-[70px] h-8 text-xs"
                        type="number"
                        min={0}
                        step={10}
-                       title="Increase to remove tiny noise components"
+                       title="Component size filter. Use 0-50 to keep fine pores; 100+ removes tiny components/noise."
                        value={baselineMinComponentSize}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -529,7 +529,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                      />
                    </div>
                    <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-connectivity" title="3D connected-component neighborhood (1=faces only, 3=faces+edges+corners)">Conn</Label>
+                     <Label htmlFor="baseline-connectivity" title="3D connectivity for connected components (integer 1-3). 1=faces only, 2=faces+edges, 3=faces+edges+corners. Higher values merge diagonally touching pores into the same component.">Conn</Label>
                      <Input
                        id="baseline-connectivity"
                        className="w-[62px] h-8 text-xs"
@@ -537,7 +537,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        min={1}
                        max={3}
                        step={1}
-                       title="Higher values merge diagonally touching pores into larger components"
+                       title="Connectivity 1-3. Use 1 to keep nearby pores separated; use 3 for more permissive component merging."
                        value={baselineConnectivity}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -549,9 +549,6 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                          toolboxState.setBaselineConnectivity(clamped);
                        }}
                      />
-                   </div>
-                   <div className="w-full text-[11px] text-muted-foreground leading-tight">
-                     Tips: lower Sigma/Clip/Thresh for higher pore sensitivity; raise MinPx to suppress noise; lower Conn to keep nearby pores separated.
                    </div>
                  </div>
                 )}
