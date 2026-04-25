@@ -537,6 +537,8 @@ class BasicInferTask(InferTask):
             sigma = float(data.get("baseline_sigma", 1.0))
             threshold_scale = float(data.get("baseline_threshold_scale", 1.0))
             min_component_size = int(data.get("baseline_min_component_size", 0))
+            connectivity = int(data.get("baseline_connectivity", 3))
+            connectivity = max(1, min(3, connectivity))
 
             img_np = sitk.GetArrayFromImage(img).astype(np.float32)
 
@@ -567,7 +569,7 @@ class BasicInferTask(InferTask):
             thresh = max(0.0, min(1.0, thresh))
             dark_mask = smoothed < thresh
 
-            struct = ndimage.generate_binary_structure(3, 3)
+            struct = ndimage.generate_binary_structure(3, connectivity)
             labelled, n_components = ndimage.label(dark_mask, structure=struct)
 
             output = np.ones(normed.shape, dtype=np.uint8)
@@ -595,6 +597,7 @@ class BasicInferTask(InferTask):
                 "baseline_clip_quantile": clip_quantile,
                 "baseline_threshold_scale": threshold_scale,
                 "baseline_min_component_size": min_component_size,
+                "baseline_connectivity": connectivity,
             }
             final_result_json["sam_elapsed"] = elapsed
 

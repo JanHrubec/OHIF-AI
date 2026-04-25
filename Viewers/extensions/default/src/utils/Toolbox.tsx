@@ -44,6 +44,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
   const [baselineClipQuantile, setBaselineClipQuantile] = useState<number>(toolboxState.getBaselineClipQuantile());
   const [baselineThresholdScale, setBaselineThresholdScale] = useState<number>(toolboxState.getBaselineThresholdScale());
   const [baselineMinComponentSize, setBaselineMinComponentSize] = useState<number>(toolboxState.getBaselineMinComponentSize());
+  const [baselineConnectivity, setBaselineConnectivity] = useState<number>(toolboxState.getBaselineConnectivity());
   const [useCurrentMaskAsSeed, setUseCurrentMaskAsSeed] = useState<boolean>(toolboxState.getUseCurrentMaskAsSeed());
   const [medgemmaResult, setMedgemmaResult] = useState(toolboxState.getMedgemmaResult());
   const [medgemmaInstruction, setMedgemmaInstruction] = useState(toolboxState.getMedgemmaInstruction());
@@ -82,6 +83,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
       setBaselineClipQuantile(toolboxState.getBaselineClipQuantile());
       setBaselineThresholdScale(toolboxState.getBaselineThresholdScale());
       setBaselineMinComponentSize(toolboxState.getBaselineMinComponentSize());
+      setBaselineConnectivity(toolboxState.getBaselineConnectivity());
       setUseCurrentMaskAsSeed(toolboxState.getUseCurrentMaskAsSeed());
       setIsLocked(toolboxState.getLocked());
     };
@@ -525,6 +527,31 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                          toolboxState.setBaselineMinComponentSize(next);
                        }}
                      />
+                   </div>
+                   <div className="flex items-center gap-1">
+                     <Label htmlFor="baseline-connectivity" title="3D connected-component neighborhood (1=faces only, 3=faces+edges+corners)">Conn</Label>
+                     <Input
+                       id="baseline-connectivity"
+                       className="w-[62px] h-8 text-xs"
+                       type="number"
+                       min={1}
+                       max={3}
+                       step={1}
+                       title="Higher values merge diagonally touching pores into larger components"
+                       value={baselineConnectivity}
+                       onChange={(e) => {
+                         const next = Number(e.target.value);
+                         if (!Number.isFinite(next)) {
+                           return;
+                         }
+                         const clamped = Math.max(1, Math.min(3, Math.round(next)));
+                         setBaselineConnectivity(clamped);
+                         toolboxState.setBaselineConnectivity(clamped);
+                       }}
+                     />
+                   </div>
+                   <div className="w-full text-[11px] text-muted-foreground leading-tight">
+                     Tips: lower Sigma/Clip/Thresh for higher pore sensitivity; raise MinPx to suppress noise; lower Conn to keep nearby pores separated.
                    </div>
                  </div>
                 )}

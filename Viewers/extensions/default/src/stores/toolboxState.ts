@@ -11,6 +11,7 @@ let baselineSigma = 1.0;
 let baselineClipQuantile = 0.98;
 let baselineThresholdScale = 1.0;
 let baselineMinComponentSize = 0;
+let baselineConnectivity = 3;
 let useCurrentMaskAsSeed = true;
 let medgemmaResult: string | null = null;
 let medgemmaInstruction: string = '';
@@ -76,6 +77,10 @@ export const toolboxState = {
   getBaselineMinComponentSize: () => baselineMinComponentSize,
   setBaselineMinComponentSize: (value: number) => {
     baselineMinComponentSize = value;
+  },
+  getBaselineConnectivity: () => baselineConnectivity,
+  setBaselineConnectivity: (value: number) => {
+    baselineConnectivity = value;
   },
   getUseCurrentMaskAsSeed: () => useCurrentMaskAsSeed,
   setUseCurrentMaskAsSeed: (enabled: boolean) => {

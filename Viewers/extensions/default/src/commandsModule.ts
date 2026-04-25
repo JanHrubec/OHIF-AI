@@ -385,6 +385,7 @@ const commandsModule = ({
         baselineClipQuantile: toolboxState.getBaselineClipQuantile(),
         baselineThresholdScale: toolboxState.getBaselineThresholdScale(),
         baselineMinComponentSize: toolboxState.getBaselineMinComponentSize(),
+        baselineConnectivity: toolboxState.getBaselineConnectivity(),
       });
     },
 
@@ -910,6 +911,7 @@ const commandsModule = ({
       baselineClipQuantile?: number;
       baselineThresholdScale?: number;
       baselineMinComponentSize?: number;
+      baselineConnectivity?: number;
       useMaskSeed?: boolean;
       oneSlice?: boolean;
     } = {}) {
@@ -1318,6 +1320,7 @@ const commandsModule = ({
         baseline_clip_quantile: options.baselineClipQuantile,
         baseline_threshold_scale: options.baselineThresholdScale,
         baseline_min_component_size: options.baselineMinComponentSize,
+        baseline_connectivity: options.baselineConnectivity,
         use_mask_seed: !useBaseline && !toolboxState.getRefineNew() && useMaskSeed,
         seed_masks: seedMasks,
       };
