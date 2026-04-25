@@ -1098,15 +1098,13 @@ class BasicInferTask(InferTask):
 
             unsupported_sam_prompt_count = (
                 len(result_json.get("neg_boxes", []))
-                + len(result_json.get("pos_lassos", []))
                 + len(result_json.get("neg_lassos", []))
-                + len(result_json.get("pos_scribbles", []))
                 + len(result_json.get("neg_scribbles", []))
             )
             if unsupported_sam_prompt_count > 0:
                 warning_msg = (
-                    "SAM backend supports points and positive boxes. "
-                    "Negative boxes, lassos, and scribbles are ignored."
+                    "SAM backend supports points, positive boxes, and positive lasso/scribble as mask prompts. "
+                    "Negative boxes/negative lasso/negative scribble are ignored."
                 )
                 logger.warning(warning_msg)
                 result_json["warnings"] = result_json.get("warnings", []) + [warning_msg]
@@ -1147,6 +1145,70 @@ class BasicInferTask(InferTask):
             len_y = img.GetSize()[1]
             len_x = img.GetSize()[0]
             logger.info(f"len Z Y X: {len_z}, {len_y}, {len_x}")
+
+            prompt_masks_by_slice: Dict[int, np.ndarray] = {}
+
+            def _ensure_prompt_mask(slice_idx: int):
+                if slice_idx < 0 or slice_idx >= len_z:
+                    return None
+                if slice_idx not in prompt_masks_by_slice:
+                    prompt_masks_by_slice[slice_idx] = np.zeros((len_y, len_x), dtype=np.uint8)
+                return prompt_masks_by_slice[slice_idx]
+
+            def _add_lasso_masks(lassos):
+                if not isinstance(lassos, list):
+                    return
+                for lasso in lassos:
+                    if not isinstance(lasso, list) or len(lasso) == 0:
+                        continue
+                    try:
+                        dense = clean_and_densify_polyline(lasso)
+                        filled = np.asarray(get_scanline_filled_points_3d(dense), dtype=np.int64)
+                    except Exception:
+                        continue
+                    if filled.ndim != 2 or filled.shape[1] < 3:
+                        continue
+                    x, y, z = filled[:, 0], filled[:, 1], filled[:, 2]
+                    valid = (x >= 0) & (x < len_x) & (y >= 0) & (y < len_y) & (z >= 0) & (z < len_z)
+                    for xx, yy, zz in zip(x[valid], y[valid], z[valid]):
+                        mask = _ensure_prompt_mask(int(zz))
+                        if mask is not None:
+                            mask[int(yy), int(xx)] = 1
+
+            def _add_scribble_masks(scribbles):
+                if not isinstance(scribbles, list):
+                    return
+                scribble_slices = set()
+                for scribble in scribbles:
+                    if not isinstance(scribble, list) or len(scribble) == 0:
+                        continue
+                    try:
+                        dense = clean_and_densify_polyline(scribble)
+                        pts = np.round(np.asarray(dense, dtype=np.float32)).astype(np.int64)
+                    except Exception:
+                        continue
+                    if pts.ndim != 2 or pts.shape[1] < 3:
+                        continue
+                    x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
+                    valid = (x >= 0) & (x < len_x) & (y >= 0) & (y < len_y) & (z >= 0) & (z < len_z)
+                    for xx, yy, zz in zip(x[valid], y[valid], z[valid]):
+                        mask = _ensure_prompt_mask(int(zz))
+                        if mask is not None:
+                            mask[int(yy), int(xx)] = 1
+                            scribble_slices.add(int(zz))
+
+                for slice_idx in scribble_slices:
+                    mask = prompt_masks_by_slice.get(slice_idx)
+                    if mask is None:
+                        continue
+                    prompt_masks_by_slice[slice_idx] = ndimage.binary_dilation(
+                        mask.astype(bool),
+                        structure=np.ones((3, 3), dtype=bool),
+                        iterations=1,
+                    ).astype(np.uint8)
+
+            _add_lasso_masks(result_json.get("pos_lassos", []))
+            _add_scribble_masks(result_json.get("pos_scribbles", []))
             
             file_name = data['image'].split('/')[-1]
             frame_names = []
@@ -1269,6 +1331,8 @@ class BasicInferTask(InferTask):
                             if 0 <= frame_idx < len_z:
                                 ann_frame_values.add(frame_idx)
 
+            ann_frame_values.update(prompt_masks_by_slice.keys())
+
             if use_mask_seed:
                 ann_frame_values.update(
                     [slice_idx for slice_idx in seed_masks_by_slice.keys() if 0 <= slice_idx < len_z]
@@ -1311,6 +1375,7 @@ class BasicInferTask(InferTask):
 
                 seed_obj_ids = None
                 seed_video_res_masks = None
+                merged_mask_prompt = None
 
                 if use_mask_seed and value in seed_masks_by_slice:
                     flat_indices = seed_masks_by_slice[value]
@@ -1322,21 +1387,33 @@ class BasicInferTask(InferTask):
                             ys = valid_indices // len_x
                             xs = valid_indices % len_x
                             seed_mask[ys, xs] = 1
-                            with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-                                if medsam2 == 'sam3':
-                                    _, seed_obj_ids, _, seed_video_res_masks = predictor.add_new_mask(
-                                        inference_state=inference_state,
-                                        frame_idx=ann_frame_idx,
-                                        obj_id=ann_obj_id,
-                                        mask=torch.from_numpy(seed_mask),
-                                    )
-                                else:
-                                    _, seed_obj_ids, seed_video_res_masks = predictor.add_new_mask(
-                                        inference_state=inference_state,
-                                        frame_idx=ann_frame_idx,
-                                        obj_id=ann_obj_id,
-                                        mask=seed_mask,
-                                    )
+                            merged_mask_prompt = seed_mask
+
+                if value in prompt_masks_by_slice:
+                    prompt_mask = prompt_masks_by_slice[value]
+                    if prompt_mask is not None and np.any(prompt_mask > 0):
+                        merged_mask_prompt = (
+                            prompt_mask
+                            if merged_mask_prompt is None
+                            else np.maximum(merged_mask_prompt, prompt_mask)
+                        )
+
+                if merged_mask_prompt is not None and np.any(merged_mask_prompt > 0):
+                    with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
+                        if medsam2 == 'sam3':
+                            _, seed_obj_ids, _, seed_video_res_masks = predictor.add_new_mask(
+                                inference_state=inference_state,
+                                frame_idx=ann_frame_idx,
+                                obj_id=ann_obj_id,
+                                mask=torch.from_numpy(merged_mask_prompt.astype(np.uint8)),
+                            )
+                        else:
+                            _, seed_obj_ids, seed_video_res_masks = predictor.add_new_mask(
+                                inference_state=inference_state,
+                                frame_idx=ann_frame_idx,
+                                obj_id=ann_obj_id,
+                                mask=merged_mask_prompt.astype(np.uint8),
+                            )
 
                 has_points = len(pos_points) > 0 or len(neg_points) > 0
                 has_boxes = len(pre_boxes) != 0

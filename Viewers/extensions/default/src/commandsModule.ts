@@ -1115,13 +1115,13 @@ const commandsModule = ({
       const hasSupportedSamPromptInputs =
         pos_points.length > 0 ||
         neg_points.length > 0 ||
-        pos_boxes.length > 0;
+        pos_boxes.length > 0 ||
+        pos_lassos.length > 0 ||
+        pos_scribbles.length > 0;
 
       const hasUnsupportedSamPromptInputs =
         neg_boxes.length > 0 ||
-        pos_lassos.length > 0 ||
         neg_lassos.length > 0 ||
-        pos_scribbles.length > 0 ||
         neg_scribbles.length > 0;
 
       let seedMasks: Array<{ slice: number; indices: number[] }> = [];
@@ -1144,6 +1144,21 @@ const commandsModule = ({
             }
           });
         });
+        const collectPromptPolylineSlices = (polylines: any[]) => {
+          polylines.forEach(polyline => {
+            if (!Array.isArray(polyline)) {
+              return;
+            }
+            polyline.forEach(point => {
+              if (Number.isFinite(point?.[2])) {
+                promptSlices.add(point[2]);
+              }
+            });
+          });
+        };
+        collectPromptPolylineSlices(pos_lassos as any[]);
+        collectPromptPolylineSlices(pos_scribbles as any[]);
+
         const labelmapImageIds =
           activeSegmentation?.representationData?.Labelmap?.imageIds || [];
 
@@ -1279,7 +1294,7 @@ const commandsModule = ({
       if (!useBaseline && hasUnsupportedSamPromptInputs) {
         uiNotificationService.show({
           title: 'Unsupported SAM prompts',
-          message: 'Negative boxes, lassos, and scribbles are not supported by SAM inference and will be ignored.',
+          message: 'Negative boxes, negative lassos, and negative scribbles are not supported by SAM inference and will be ignored.',
           type: 'warning',
           duration: 5000,
         });
@@ -1289,8 +1304,8 @@ const commandsModule = ({
         uiNotificationService.show({
           title: 'Prompt info',
           message: hasSeedInputs
-            ? 'SAM refinement uses mask seeds plus supported SAM prompts (points and positive boxes).'
-            : 'SAM refinement uses supported SAM prompts (points and positive boxes).',
+            ? 'SAM refinement uses mask seeds plus supported prompts (points, positive boxes, positive lassos/scribbles as mask prompts).'
+            : 'SAM refinement uses supported prompts (points, positive boxes, positive lassos/scribbles as mask prompts).',
           type: 'info',
           duration: 4000,
         });
@@ -1307,11 +1322,11 @@ const commandsModule = ({
         pos_points: pos_points,
         neg_points: neg_points,
         pos_boxes: pos_boxes,
-        neg_boxes: [],
-        pos_lassos: [],
-        neg_lassos: [],
-        pos_scribbles: [],
-        neg_scribbles: [],
+        neg_boxes: neg_boxes,
+        pos_lassos: pos_lassos,
+        neg_lassos: neg_lassos,
+        pos_scribbles: pos_scribbles,
+        neg_scribbles: neg_scribbles,
         texts: text_prompts,
         nninter: false,
         medsam2: medsam2,
