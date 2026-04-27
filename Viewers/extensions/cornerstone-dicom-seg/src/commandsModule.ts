@@ -33,6 +33,64 @@ const {
 
 const { downloadDICOMData } = helpers;
 
+/**
+ * Creates a minimal grayscale TIFF file buffer.
+ * Fiji/ImageJ can read these basic TIFF files without issues.
+ */
+function createGrayscaleTIFF(pixelData: Uint8Array, height: number, width: number): ArrayBuffer {
+  const buffer = new ArrayBuffer(8 + 180 + 8 + pixelData.length); // Header + IFD + image data
+  const view = new DataView(buffer);
+  const uint8 = new Uint8Array(buffer);
+
+  let offset = 0;
+
+  // TIFF Header (little-endian)
+  view.setUint16(offset, 0x4949, true); // 'II' = little-endian
+  offset += 2;
+  view.setUint16(offset, 42, true); // TIFF magic number
+  offset += 2;
+  view.setUint32(offset, 8, true); // Offset to first IFD
+  offset += 4;
+
+  // Image File Directory (IFD)
+  const ifdOffset = 8;
+  const dataOffset = ifdOffset + 2 + 12 * 11 + 4; // After IFD and entries
+
+  view.setUint16(ifdOffset, 11, true); // Number of directory entries
+
+  let ifdPos = ifdOffset + 2;
+
+  // Helper to add IFD entry
+  const addIFDEntry = (tag: number, type: number, count: number, value: number) => {
+    view.setUint16(ifdPos, tag, true);
+    view.setUint16(ifdPos + 2, type, true);
+    view.setUint32(ifdPos + 4, count, true);
+    view.setUint32(ifdPos + 8, value, true);
+    ifdPos += 12;
+  };
+
+  // IFD Entries (in ascending tag order)
+  addIFDEntry(254, 4, 1, 0); // ImageWidth = 0 (new image)
+  addIFDEntry(256, 4, 1, width); // ImageWidth
+  addIFDEntry(257, 4, 1, height); // ImageLength (height)
+  addIFDEntry(258, 3, 1, 8); // BitsPerSample = 8
+  addIFDEntry(259, 3, 1, 1); // Compression = None
+  addIFDEntry(262, 3, 1, 1); // PhotometricInterpretation = BlackIsZero
+  addIFDEntry(273, 4, 1, dataOffset); // StripOffsets
+  addIFDEntry(277, 3, 1, 1); // SamplesPerPixel = 1 (grayscale)
+  addIFDEntry(278, 4, 1, height); // RowsPerStrip = all rows
+  addIFDEntry(279, 4, 1, pixelData.length); // StripByteCounts
+  addIFDEntry(282, 5, 1, 72); // XResolution = 72 DPI
+
+  // Next IFD offset (none)
+  view.setUint32(ifdPos, 0, true);
+
+  // Append pixel data
+  uint8.set(pixelData, dataOffset);
+
+  return buffer;
+}
+
 const commandsModule = ({
   servicesManager,
   extensionManager,
@@ -259,6 +317,73 @@ const commandsModule = ({
       downloadDICOMData(generatedSegmentation.dataset, `${segmentationInOHIF.label}`);
     },
     /**
+     * Downloads a segmentation as a TIFF slice for viewing in Fiji/ImageJ.
+     * Exports the non-empty slice with the largest segmented area.
+     *
+     * @param {Object} params - Parameters for the function.
+     * @param params.segmentationId - ID of the segmentation to be downloaded.
+     */
+    downloadSegmentationAsTiff: async ({ segmentationId }) => {
+      const segmentation = cornerstoneToolsSegmentation.state.getSegmentation(segmentationId);
+      const segmentationInOHIF = segmentationService.getSegmentation(segmentationId);
+
+      if (!segmentation || !segmentation.representationData.Labelmap) {
+        throw new Error('No segmentation labelmap found');
+      }
+
+      const { imageIds } = segmentation.representationData.Labelmap;
+      const segImages = imageIds.map(imageId => cache.getImage(imageId));
+
+      let bestSliceIndex = -1;
+      let bestSliceData: Uint8Array | null = null;
+      let bestRows = 0;
+      let bestColumns = 0;
+      let bestCount = -1;
+
+      for (let sliceIndex = 0; sliceIndex < segImages.length; sliceIndex++) {
+        const segImage = segImages[sliceIndex];
+        if (!segImage) {
+          continue;
+        }
+
+        const pixelData = segImage.getPixelData();
+        const { rows, columns } = segImage;
+
+        const uint8PixelData = new Uint8Array(pixelData.length);
+        let count = 0;
+        for (let i = 0; i < pixelData.length; i++) {
+          const v = pixelData[i] > 0 ? 255 : 0;
+          uint8PixelData[i] = v;
+          if (v) {
+            count++;
+          }
+        }
+
+        if (count > bestCount) {
+          bestCount = count;
+          bestSliceIndex = sliceIndex;
+          bestSliceData = uint8PixelData;
+          bestRows = rows;
+          bestColumns = columns;
+        }
+      }
+
+      if (!bestSliceData || bestSliceIndex < 0) {
+        throw new Error('No segmentation slice found to export');
+      }
+
+      const tiffBuffer = createGrayscaleTIFF(bestSliceData, bestRows, bestColumns);
+      const tiffBlob = new Blob([tiffBuffer], { type: 'image/tiff' });
+      const url = URL.createObjectURL(tiffBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${segmentationInOHIF.label}_slice_${String(bestSliceIndex).padStart(4, '0')}.tif`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    /**
      * Stores a segmentation based on the provided segmentationId into a specified data source.
      * The SeriesDescription is derived from user input or defaults to the segmentation label,
      * and in its absence, defaults to 'Research Derived Series'.
@@ -378,6 +503,9 @@ const commandsModule = ({
     },
     downloadSegmentation: {
       commandFn: actions.downloadSegmentation,
+    },
+    downloadSegmentationAsTiff: {
+      commandFn: actions.downloadSegmentationAsTiff,
     },
     storeSegmentation: {
       commandFn: actions.storeSegmentation,
