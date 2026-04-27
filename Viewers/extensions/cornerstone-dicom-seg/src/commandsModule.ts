@@ -38,7 +38,10 @@ const { downloadDICOMData } = helpers;
  * Fiji/ImageJ can read these basic TIFF files without issues.
  */
 function createGrayscaleTIFF(pixelData: Uint8Array, height: number, width: number): ArrayBuffer {
-  const buffer = new ArrayBuffer(8 + 180 + 8 + pixelData.length); // Header + IFD + image data
+  const numEntries = 10;
+  const ifdOffset = 8;
+  const dataOffset = ifdOffset + 2 + 12 * numEntries + 4; // entryCount + entries + nextIFDOffset
+  const buffer = new ArrayBuffer(dataOffset + pixelData.length);
   const view = new DataView(buffer);
   const uint8 = new Uint8Array(buffer);
 
@@ -53,10 +56,7 @@ function createGrayscaleTIFF(pixelData: Uint8Array, height: number, width: numbe
   offset += 4;
 
   // Image File Directory (IFD)
-  const ifdOffset = 8;
-  const dataOffset = ifdOffset + 2 + 12 * 11 + 4; // After IFD and entries
-
-  view.setUint16(ifdOffset, 11, true); // Number of directory entries
+  view.setUint16(ifdOffset, numEntries, true); // Number of directory entries
 
   let ifdPos = ifdOffset + 2;
 
@@ -70,7 +70,7 @@ function createGrayscaleTIFF(pixelData: Uint8Array, height: number, width: numbe
   };
 
   // IFD Entries (in ascending tag order)
-  addIFDEntry(254, 4, 1, 0); // ImageWidth = 0 (new image)
+  addIFDEntry(254, 4, 1, 0); // NewSubfileType = full-resolution image
   addIFDEntry(256, 4, 1, width); // ImageWidth
   addIFDEntry(257, 4, 1, height); // ImageLength (height)
   addIFDEntry(258, 3, 1, 8); // BitsPerSample = 8
@@ -80,7 +80,6 @@ function createGrayscaleTIFF(pixelData: Uint8Array, height: number, width: numbe
   addIFDEntry(277, 3, 1, 1); // SamplesPerPixel = 1 (grayscale)
   addIFDEntry(278, 4, 1, height); // RowsPerStrip = all rows
   addIFDEntry(279, 4, 1, pixelData.length); // StripByteCounts
-  addIFDEntry(282, 5, 1, 72); // XResolution = 72 DPI
 
   // Next IFD offset (none)
   view.setUint32(ifdPos, 0, true);
