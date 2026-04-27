@@ -729,6 +729,11 @@ const toolbarButtons: Button[] = [
         toolNames: ['CircularBrush', 'SphereBrush'],
         disabledText: 'Create new segmentation to enable this tool.',
       },
+      commands: 'setToolActiveToolbar',
+      commandOptions: {
+        toolGroupIds: ['default', 'mpr', 'SRToolGroup', 'volume3d'],
+        toolName: 'CircularBrush',
+      },
       options: [
         {
           name: 'Radius (mm)',
@@ -890,6 +895,11 @@ const toolbarButtons: Button[] = [
         name: 'evaluate.cornerstone.segmentation',
         toolNames: ['CircularEraser', 'SphereEraser'],
       },
+      commands: 'setToolActiveToolbar',
+      commandOptions: {
+        toolGroupIds: ['default', 'mpr', 'SRToolGroup', 'volume3d'],
+        toolName: 'CircularEraser',
+      },
       options: [
         {
           name: 'Radius (mm)',
@@ -932,6 +942,11 @@ const toolbarButtons: Button[] = [
           'ThresholdCircularBrushDynamic',
           'ThresholdSphereBrushDynamic',
         ],
+      },
+      commands: 'setToolActiveToolbar',
+      commandOptions: {
+        toolGroupIds: ['default', 'mpr', 'SRToolGroup', 'volume3d'],
+        toolName: 'ThresholdCircularBrush',
       },
       options: [
         {

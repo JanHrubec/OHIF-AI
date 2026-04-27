@@ -1,0 +1,17 @@
+services:
+  ohif_viewer:
+    build:
+      args:
+        PUBLIC_URL: /
+    ports:
+      - '18443:1025' # SSL (local)
+      - '18080:1026' # Web (local)
+
+  monai_sam2:
+    ports:
+      - '18002:8002' # MONAI API (local)
+
+  orthanc:
+    ports:
+      - '18042:8042' # Orthanc HTTP (local)
+      - '14242:4242' # Orthanc DICOM (local)

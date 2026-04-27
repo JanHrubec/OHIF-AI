@@ -184,10 +184,10 @@ function commandsModule({
         const isVisible = cornerstoneTools.annotation.visibility.isAnnotationVisible(
           annotation.annotationUID
         );
-        if (!isVisible) {
+        if (isVisible) {
           cornerstoneTools.annotation.visibility.setAnnotationVisibility(
             annotation.annotationUID,
-            true
+            !isVisible
           );
         }
         // Update segmentation stats
