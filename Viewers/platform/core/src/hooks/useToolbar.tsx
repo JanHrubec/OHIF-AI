@@ -26,9 +26,18 @@ export function useToolbar({ buttonSection = 'primary' }: withAppTypes) {
 
         // Process item commands
         if (itemCommands) {
-          Array.isArray(itemCommands)
-            ? allCommands.push(...itemCommands)
-            : allCommands.push(itemCommands);
+          if (Array.isArray(itemCommands)) {
+            allCommands.push(...itemCommands);
+          } else {
+            // Wrap string command with commandOptions from button props
+            if (typeof itemCommands === 'string' && buttonProps.commandOptions) {
+              const processedCommand = () =>
+                commandsManager.run(itemCommands, buttonProps.commandOptions);
+              allCommands.push(processedCommand);
+            } else {
+              allCommands.push(itemCommands);
+            }
+          }
         }
 
         // Process commands from options

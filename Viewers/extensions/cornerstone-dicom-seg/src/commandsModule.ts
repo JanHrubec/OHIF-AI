@@ -90,6 +90,84 @@ function createGrayscaleTIFF(pixelData: Uint8Array, height: number, width: numbe
   return buffer;
 }
 
+/**
+ * Create multi-page TIFF from array of pixel data
+ * Each slice becomes a separate image in the TIFF file
+ */
+function createMultiPageTIFF(
+  slices: Array<{ pixelData: Uint8Array; rows: number; columns: number }>
+): ArrayBuffer {
+  if (slices.length === 0) throw new Error('No slices to export');
+
+  const parts: Uint8Array[] = [];
+
+  // TIFF Header
+  const header = new ArrayBuffer(8);
+  const headerView = new DataView(header);
+  headerView.setUint16(0, 0x4949, true); // 'II' = little-endian
+  headerView.setUint16(2, 42, true); // TIFF magic
+  headerView.setUint32(4, 8, true); // Offset to first IFD
+  parts.push(new Uint8Array(header));
+
+  let currentOffset = 8;
+
+  // Create IFD for each slice
+  for (let i = 0; i < slices.length; i++) {
+    const slice = slices[i];
+    const numEntries = 10;
+    const ifdSize = 2 + 12 * numEntries + 4;
+    const dataOffset = currentOffset + ifdSize;
+
+    const ifd = new ArrayBuffer(ifdSize);
+    const ifdView = new DataView(ifd);
+    const ifdUint8 = new Uint8Array(ifd);
+
+    ifdView.setUint16(0, numEntries, true);
+    let ifdPos = 2;
+
+    const addEntry = (tag: number, type: number, count: number, value: number) => {
+      ifdView.setUint16(ifdPos, tag, true);
+      ifdView.setUint16(ifdPos + 2, type, true);
+      ifdView.setUint32(ifdPos + 4, count, true);
+      ifdView.setUint32(ifdPos + 8, value, true);
+      ifdPos += 12;
+    };
+
+    addEntry(254, 4, 1, i === 0 ? 0 : 1); // NewSubfileType (0=full res, 1=reduced)
+    addEntry(256, 4, 1, slice.columns); // ImageWidth
+    addEntry(257, 4, 1, slice.rows); // ImageLength
+    addEntry(258, 3, 1, 8); // BitsPerSample
+    addEntry(259, 3, 1, 1); // Compression (1=none)
+    addEntry(262, 3, 1, 1); // PhotometricInterpretation (1=BlackIsZero)
+    addEntry(273, 4, 1, dataOffset); // StripOffsets
+    addEntry(277, 3, 1, 1); // SamplesPerPixel
+    addEntry(278, 4, 1, slice.rows); // RowsPerStrip
+    addEntry(279, 4, 1, slice.pixelData.length); // StripByteCounts
+
+    // Next IFD offset
+    const nextIFDOffset =
+      i < slices.length - 1 ? dataOffset + slice.pixelData.length : 0;
+    ifdView.setUint32(ifdPos, nextIFDOffset, true);
+
+    parts.push(ifdUint8);
+    parts.push(slice.pixelData);
+
+    currentOffset = nextIFDOffset;
+  }
+
+  // Merge all parts
+  let totalSize = 0;
+  for (const part of parts) totalSize += part.length;
+  const result = new Uint8Array(totalSize);
+  let pos = 0;
+  for (const part of parts) {
+    result.set(part, pos);
+    pos += part.length;
+  }
+
+  return result.buffer;
+}
+
 const commandsModule = ({
   servicesManager,
   extensionManager,
@@ -383,6 +461,57 @@ const commandsModule = ({
       URL.revokeObjectURL(url);
     },
     /**
+     * Exports all segmentation slices as a multi-page TIFF file.
+     *
+     * @param {Object} params - Parameters for the function.
+     * @param params.segmentationId - ID of the segmentation to be downloaded.
+     */
+    downloadSegmentationAsAllSlicesTiff: async ({ segmentationId }) => {
+      const segmentation = cornerstoneToolsSegmentation.state.getSegmentation(segmentationId);
+      const segmentationInOHIF = segmentationService.getSegmentation(segmentationId);
+
+      if (!segmentation || !segmentation.representationData.Labelmap) {
+        throw new Error('No segmentation labelmap found');
+      }
+
+      const { imageIds } = segmentation.representationData.Labelmap;
+      const segImages = imageIds.map(imageId => cache.getImage(imageId));
+      const slices: Array<{ pixelData: Uint8Array; rows: number; columns: number }> = [];
+
+      // Process all slices (including empty ones)
+      for (let sliceIndex = 0; sliceIndex < segImages.length; sliceIndex++) {
+        const segImage = segImages[sliceIndex];
+        if (!segImage) {
+          continue;
+        }
+
+        const pixelData = segImage.getPixelData();
+        const { rows, columns } = segImage;
+
+        const uint8PixelData = new Uint8Array(pixelData.length);
+        for (let i = 0; i < pixelData.length; i++) {
+          uint8PixelData[i] = pixelData[i] > 0 ? 255 : 0;
+        }
+
+        slices.push({ pixelData: uint8PixelData, rows, columns });
+      }
+
+      if (slices.length === 0) {
+        throw new Error('No segmentation slices found to export');
+      }
+
+      const tiffBuffer = createMultiPageTIFF(slices);
+      const tiffBlob = new Blob([tiffBuffer], { type: 'image/tiff' });
+      const url = URL.createObjectURL(tiffBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${segmentationInOHIF.label}_all_slices.tif`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    },
+    /**
      * Stores a segmentation based on the provided segmentationId into a specified data source.
      * The SeriesDescription is derived from user input or defaults to the segmentation label,
      * and in its absence, defaults to 'Research Derived Series'.
@@ -505,6 +634,9 @@ const commandsModule = ({
     },
     downloadSegmentationAsTiff: {
       commandFn: actions.downloadSegmentationAsTiff,
+    },
+    downloadSegmentationAsAllSlicesTiff: {
+      commandFn: actions.downloadSegmentationAsAllSlicesTiff,
     },
     storeSegmentation: {
       commandFn: actions.storeSegmentation,

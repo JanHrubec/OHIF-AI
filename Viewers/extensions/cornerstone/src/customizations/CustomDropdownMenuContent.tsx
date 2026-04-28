@@ -74,6 +74,9 @@ export const CustomDropdownMenuContent = () => {
     onSegmentationDownloadAsTiff: segmentationId => {
       commandsManager.run('downloadSegmentationAsTiff', { segmentationId });
     },
+    onSegmentationDownloadAsAllSlicesTiff: segmentationId => {
+      commandsManager.run('downloadSegmentationAsAllSlicesTiff', { segmentationId });
+    },
     downloadCSVSegmentationReport: segmentationId => {
       commandsManager.run('downloadCSVSegmentationReport', { segmentationId });
     },
@@ -140,6 +143,15 @@ export const CustomDropdownMenuContent = () => {
               disabled={!allowExport}
             >
               {t('TIFF (largest slice)')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={e => {
+                e.preventDefault();
+                actions.onSegmentationDownloadAsAllSlicesTiff(segmentationId);
+              }}
+              disabled={!allowExport}
+            >
+              {t('TIFF (all slices)')}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel className="flex items-center pl-0">
