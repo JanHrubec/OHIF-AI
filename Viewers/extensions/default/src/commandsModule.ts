@@ -201,6 +201,7 @@ const commandsModule = ({
     }
     
     servicesManager.services.segmentationService.setActiveSegment(segmentationId, segmentNumber);
+    servicesManager.services.segmentationService.setActiveSegmentation(activeViewportId, segmentationId);
     toolboxState.setCurrentActiveSegment(segmentNumber);
     await servicesManager.services.segmentationService.addSegmentationRepresentation(activeViewportId, {
       segmentationId: segmentationId,
@@ -385,7 +386,6 @@ const commandsModule = ({
         baselineClipQuantile: toolboxState.getBaselineClipQuantile(),
         baselineThresholdScale: toolboxState.getBaselineThresholdScale(),
         baselineMinComponentSize: toolboxState.getBaselineMinComponentSize(),
-        baselineConnectivity: toolboxState.getBaselineConnectivity(),
       });
     },
 
@@ -911,7 +911,6 @@ const commandsModule = ({
       baselineClipQuantile?: number;
       baselineThresholdScale?: number;
       baselineMinComponentSize?: number;
-      baselineConnectivity?: number;
       useMaskSeed?: boolean;
       oneSlice?: boolean;
     } = {}) {
@@ -1108,9 +1107,8 @@ const commandsModule = ({
         shouldRefineCurrentMask
           ? true
           : options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
-      const hasNegPromptInputs = neg_points.length > 0;
       const preserveExistingSegmentMask =
-        shouldRefineCurrentMask && useMaskSeed && !hasNegPromptInputs;
+        shouldRefineCurrentMask && useMaskSeed;
 
       const hasSupportedSamPromptInputs =
         pos_points.length > 0 ||
@@ -1335,7 +1333,7 @@ const commandsModule = ({
         baseline_clip_quantile: options.baselineClipQuantile,
         baseline_threshold_scale: options.baselineThresholdScale,
         baseline_min_component_size: options.baselineMinComponentSize,
-        baseline_connectivity: options.baselineConnectivity,
+        baseline_connectivity: 1,
         use_mask_seed: !useBaseline && !toolboxState.getRefineNew() && useMaskSeed,
         seed_masks: seedMasks,
       };
@@ -1613,7 +1611,7 @@ const commandsModule = ({
             segmentIndex: segmentNumber,
             label: label_name,
             locked: false,
-            active: false,
+            active: true,
             cachedStats: {
 
               modifiedTime: utils.formatDate(Date.now(), 'YYYYMMDD'),
@@ -2315,7 +2313,7 @@ const commandsModule = ({
             segmentIndex: segmentNumber,
             label: label_name,
             locked: false,
-            active: false,
+            active: true,
             cachedStats: {
 
               modifiedTime: utils.formatDate(Date.now(), 'YYYYMMDD'),

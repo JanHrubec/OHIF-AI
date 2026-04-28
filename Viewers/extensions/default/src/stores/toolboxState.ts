@@ -7,11 +7,10 @@ let textPromptReplaceNew = false; // Replace/New toggle for Text Prompt Segmenta
 let selectedModel: 'nnInteractive' | 'sam2' | 'medsam2' | 'sam3' = 'medsam2'; // Default to MedSAM2
 let locked = false;
 let currentActiveSegment = 1;
-let baselineSigma = 1.0;
-let baselineClipQuantile = 0.98;
-let baselineThresholdScale = 1.0;
+let baselineSigma = 0.4;
+let baselineClipQuantile = 0.8;
+let baselineThresholdScale = 1.2;
 let baselineMinComponentSize = 0;
-let baselineConnectivity = 3;
 let useCurrentMaskAsSeed = true;
 let medgemmaResult: string | null = null;
 let medgemmaInstruction: string = '';
@@ -77,10 +76,6 @@ export const toolboxState = {
   getBaselineMinComponentSize: () => baselineMinComponentSize,
   setBaselineMinComponentSize: (value: number) => {
     baselineMinComponentSize = value;
-  },
-  getBaselineConnectivity: () => baselineConnectivity,
-  setBaselineConnectivity: (value: number) => {
-    baselineConnectivity = value;
   },
   getUseCurrentMaskAsSeed: () => useCurrentMaskAsSeed,
   setUseCurrentMaskAsSeed: (enabled: boolean) => {

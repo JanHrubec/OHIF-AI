@@ -36,6 +36,7 @@ import CornerstoneViewportDownloadForm from './utils/CornerstoneViewportDownload
 import { updateSegmentBidirectionalStats } from './utils/updateSegmentationStats';
 import { generateSegmentationCSVReport } from './utils/generateSegmentationCSVReport';
 import { getUpdatedViewportsForSegmentation } from './utils/hydrationUtils';
+import { toolboxState } from '@ohif/extension-default/src/stores/toolboxState';
 
 const { DefaultHistoryMemo } = csUtils.HistoryMemo;
 const toggleSyncFunctions = {
@@ -1290,6 +1291,12 @@ function commandsModule({
         viewportGridService.getActiveViewportId(),
         segmentationId
       );
+
+      const activeViewportId = viewportGridService.getActiveViewportId();
+      const activeSegment = segmentationService.getActiveSegment(activeViewportId);
+      if (activeSegment) {
+        toolboxState.setCurrentActiveSegment(activeSegment.segmentIndex);
+      }
     },
 
     /**
@@ -1299,6 +1306,12 @@ function commandsModule({
     addSegmentCommand: ({ segmentationId }) => {
       const { segmentationService } = servicesManager.services;
       segmentationService.addSegment(segmentationId);
+
+      const activeViewportId = servicesManager.services.viewportGridService.getActiveViewportId();
+      const activeSegment = segmentationService.getActiveSegment(activeViewportId);
+      if (activeSegment) {
+        toolboxState.setCurrentActiveSegment(activeSegment.segmentIndex);
+      }
     },
 
     /**
@@ -1314,6 +1327,7 @@ function commandsModule({
         segmentationId
       );
       segmentationService.setActiveSegment(segmentationId, segmentIndex);
+      toolboxState.setCurrentActiveSegment(segmentIndex);
       segmentationService.jumpToSegmentCenter(segmentationId, segmentIndex);
     },
 

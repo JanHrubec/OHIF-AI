@@ -44,7 +44,6 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
   const [baselineClipQuantile, setBaselineClipQuantile] = useState<number>(toolboxState.getBaselineClipQuantile());
   const [baselineThresholdScale, setBaselineThresholdScale] = useState<number>(toolboxState.getBaselineThresholdScale());
   const [baselineMinComponentSize, setBaselineMinComponentSize] = useState<number>(toolboxState.getBaselineMinComponentSize());
-  const [baselineConnectivity, setBaselineConnectivity] = useState<number>(toolboxState.getBaselineConnectivity());
   const [useCurrentMaskAsSeed, setUseCurrentMaskAsSeed] = useState<boolean>(toolboxState.getUseCurrentMaskAsSeed());
   const [medgemmaResult, setMedgemmaResult] = useState(toolboxState.getMedgemmaResult());
   const [medgemmaInstruction, setMedgemmaInstruction] = useState(toolboxState.getMedgemmaInstruction());
@@ -83,7 +82,6 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
       setBaselineClipQuantile(toolboxState.getBaselineClipQuantile());
       setBaselineThresholdScale(toolboxState.getBaselineThresholdScale());
       setBaselineMinComponentSize(toolboxState.getBaselineMinComponentSize());
-      setBaselineConnectivity(toolboxState.getBaselineConnectivity());
       setUseCurrentMaskAsSeed(toolboxState.getUseCurrentMaskAsSeed());
       setIsLocked(toolboxState.getLocked());
     };
@@ -488,7 +486,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                      />
                    </div>
                    <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-threshold-scale" title="Multiplier on Otsu threshold (range 0.5-2.0, step 0.05). Lower values classify more voxels as pores (higher sensitivity); higher values are stricter and reduce false positives.">Thresh</Label>
+                     <Label htmlFor="baseline-threshold-scale" title="Multiplier on Otsu threshold (range 0.5-2.0, step 0.05). Higher values classify more voxels as pores (higher sensitivity); lower values are stricter and reduce false positives.">Thresh</Label>
                      <Input
                        id="baseline-threshold-scale"
                        className="w-[68px] h-8 text-xs"
@@ -496,7 +494,7 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        min={0.5}
                        max={2}
                        step={0.05}
-                       title="Threshold scale (0.5-2.0). Try 0.70-0.95 to catch weak pores; increase toward 1.1-1.4 to suppress over-segmentation."
+                       title="Threshold scale (0.5-2.0). Increase toward 1.1-1.4 to catch more pores; decrease toward 0.70-0.95 for stricter segmentation."
                        value={baselineThresholdScale}
                        onChange={(e) => {
                          const next = Number(e.target.value);
@@ -525,28 +523,6 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                          }
                          setBaselineMinComponentSize(next);
                          toolboxState.setBaselineMinComponentSize(next);
-                       }}
-                     />
-                   </div>
-                   <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-connectivity" title="3D connectivity for connected components (integer 1-3). 1=faces only, 2=faces+edges, 3=faces+edges+corners. Higher values merge diagonally touching pores into the same component.">Conn</Label>
-                     <Input
-                       id="baseline-connectivity"
-                       className="w-[62px] h-8 text-xs"
-                       type="number"
-                       min={1}
-                       max={3}
-                       step={1}
-                       title="Connectivity 1-3. Use 1 to keep nearby pores separated; use 3 for more permissive component merging."
-                       value={baselineConnectivity}
-                       onChange={(e) => {
-                         const next = Number(e.target.value);
-                         if (!Number.isFinite(next)) {
-                           return;
-                         }
-                         const clamped = Math.max(1, Math.min(3, Math.round(next)));
-                         setBaselineConnectivity(clamped);
-                         toolboxState.setBaselineConnectivity(clamped);
                        }}
                      />
                    </div>
