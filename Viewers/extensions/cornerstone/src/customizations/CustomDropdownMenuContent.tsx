@@ -71,9 +71,6 @@ export const CustomDropdownMenuContent = () => {
     onSegmentationDownload: segmentationId => {
       commandsManager.run('downloadSegmentation', { segmentationId });
     },
-    onSegmentationDownloadAsTiff: segmentationId => {
-      commandsManager.run('downloadSegmentationAsTiff', { segmentationId });
-    },
     onSegmentationDownloadAsAllSlicesTiff: segmentationId => {
       commandsManager.run('downloadSegmentationAsAllSlicesTiff', { segmentationId });
     },
@@ -134,15 +131,6 @@ export const CustomDropdownMenuContent = () => {
               disabled={!allowExport}
             >
               {t('DICOM RTSS')}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={e => {
-                e.preventDefault();
-                actions.onSegmentationDownloadAsTiff(segmentationId);
-              }}
-              disabled={!allowExport}
-            >
-              {t('TIFF (largest slice)')}
             </DropdownMenuItem>
             <DropdownMenuItem
               onClick={e => {

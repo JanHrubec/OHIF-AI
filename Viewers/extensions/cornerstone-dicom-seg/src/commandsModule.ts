@@ -394,73 +394,6 @@ const commandsModule = ({
       downloadDICOMData(generatedSegmentation.dataset, `${segmentationInOHIF.label}`);
     },
     /**
-     * Downloads a segmentation as a TIFF slice for viewing in Fiji/ImageJ.
-     * Exports the non-empty slice with the largest segmented area.
-     *
-     * @param {Object} params - Parameters for the function.
-     * @param params.segmentationId - ID of the segmentation to be downloaded.
-     */
-    downloadSegmentationAsTiff: async ({ segmentationId }) => {
-      const segmentation = cornerstoneToolsSegmentation.state.getSegmentation(segmentationId);
-      const segmentationInOHIF = segmentationService.getSegmentation(segmentationId);
-
-      if (!segmentation || !segmentation.representationData.Labelmap) {
-        throw new Error('No segmentation labelmap found');
-      }
-
-      const { imageIds } = segmentation.representationData.Labelmap;
-      const segImages = imageIds.map(imageId => cache.getImage(imageId));
-
-      let bestSliceIndex = -1;
-      let bestSliceData: Uint8Array | null = null;
-      let bestRows = 0;
-      let bestColumns = 0;
-      let bestCount = -1;
-
-      for (let sliceIndex = 0; sliceIndex < segImages.length; sliceIndex++) {
-        const segImage = segImages[sliceIndex];
-        if (!segImage) {
-          continue;
-        }
-
-        const pixelData = segImage.getPixelData();
-        const { rows, columns } = segImage;
-
-        const uint8PixelData = new Uint8Array(pixelData.length);
-        let count = 0;
-        for (let i = 0; i < pixelData.length; i++) {
-          const v = pixelData[i] > 0 ? 255 : 0;
-          uint8PixelData[i] = v;
-          if (v) {
-            count++;
-          }
-        }
-
-        if (count > bestCount) {
-          bestCount = count;
-          bestSliceIndex = sliceIndex;
-          bestSliceData = uint8PixelData;
-          bestRows = rows;
-          bestColumns = columns;
-        }
-      }
-
-      if (!bestSliceData || bestSliceIndex < 0) {
-        throw new Error('No segmentation slice found to export');
-      }
-
-      const tiffBuffer = createGrayscaleTIFF(bestSliceData, bestRows, bestColumns);
-      const tiffBlob = new Blob([tiffBuffer], { type: 'image/tiff' });
-      const url = URL.createObjectURL(tiffBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `${segmentationInOHIF.label}_slice_${String(bestSliceIndex).padStart(4, '0')}.tif`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    },
-    /**
      * Exports all segmentation slices as a multi-page TIFF file.
      *
      * @param {Object} params - Parameters for the function.
@@ -631,9 +564,6 @@ const commandsModule = ({
     },
     downloadSegmentation: {
       commandFn: actions.downloadSegmentation,
-    },
-    downloadSegmentationAsTiff: {
-      commandFn: actions.downloadSegmentationAsTiff,
     },
     downloadSegmentationAsAllSlicesTiff: {
       commandFn: actions.downloadSegmentationAsAllSlicesTiff,

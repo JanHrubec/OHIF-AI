@@ -118,9 +118,6 @@ export default function PanelSegmentation({ children }: withAppTypes) {
     onSegmentationDownload: segmentationId => {
       commandsManager.run('downloadSegmentation', { segmentationId });
     },
-    onSegmentationDownloadAsTiff: segmentationId => {
-      commandsManager.run('downloadSegmentationAsTiff', { segmentationId });
-    },
     onSegmentationDownloadAsAllSlicesTiff: segmentationId => {
       commandsManager.run('downloadSegmentationAsAllSlicesTiff', { segmentationId });
     },
