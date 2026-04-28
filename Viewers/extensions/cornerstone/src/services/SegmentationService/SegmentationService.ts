@@ -750,6 +750,16 @@ class SegmentationService extends PubSubService {
     }
 
     const { segments } = activeSegmentation;
+    const activeSegmentIndex = cstSegmentation.segmentIndex.getActiveSegmentIndex(
+      activeSegmentation.segmentationId
+    );
+
+    if (activeSegmentIndex !== undefined) {
+      const indexedActiveSegment = segments[activeSegmentIndex];
+      if (indexedActiveSegment) {
+        return indexedActiveSegment;
+      }
+    }
 
     let activeSegment;
     for (const segment of Object.values(segments)) {
@@ -1073,6 +1083,22 @@ class SegmentationService extends PubSubService {
    * The active segment is typically highlighted and available for editing operations.
    */
   public setActiveSegment(segmentationId: string, segmentIndex: number): void {
+    const segmentation = this.getCornerstoneSegmentation(segmentationId);
+    const { segments } = segmentation;
+
+    Object.values(segments).forEach(segment => {
+      segment.active = segment.segmentIndex === segmentIndex;
+    });
+
+    cstSegmentation.updateSegmentations([
+      {
+        segmentationId,
+        payload: {
+          segments,
+        },
+      },
+    ]);
+
     this._setActiveSegment(segmentationId, segmentIndex);
   }
 

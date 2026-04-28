@@ -114,7 +114,7 @@ function createMultiPageTIFF(
   // Create IFD for each slice
   for (let i = 0; i < slices.length; i++) {
     const slice = slices[i];
-    const numEntries = 10;
+    const numEntries = 11;
     const ifdSize = 2 + 12 * numEntries + 4;
     const dataOffset = currentOffset + ifdSize;
 
@@ -133,12 +133,13 @@ function createMultiPageTIFF(
       ifdPos += 12;
     };
 
-    addEntry(254, 4, 1, i === 0 ? 0 : 1); // NewSubfileType (0=full res, 1=reduced)
+    addEntry(254, 4, 1, 0); // NewSubfileType (all pages are normal images)
     addEntry(256, 4, 1, slice.columns); // ImageWidth
     addEntry(257, 4, 1, slice.rows); // ImageLength
     addEntry(258, 3, 1, 8); // BitsPerSample
     addEntry(259, 3, 1, 1); // Compression (1=none)
     addEntry(262, 3, 1, 1); // PhotometricInterpretation (1=BlackIsZero)
+    addEntry(297, 3, 2, ((slices.length & 0xffff) << 16) | ((i + 1) & 0xffff)); // PageNumber
     addEntry(273, 4, 1, dataOffset); // StripOffsets
     addEntry(277, 3, 1, 1); // SamplesPerPixel
     addEntry(278, 4, 1, slice.rows); // RowsPerStrip
