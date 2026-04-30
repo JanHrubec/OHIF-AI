@@ -11,6 +11,8 @@ interface ButtonProps {
   options?: unknown;
 }
 
+type BaselineThresholdMethod = 'otsu' | 'percentile' | 'adaptive_mean';
+
 /**
  * A toolbox is a collection of buttons and commands that they invoke, used to provide
  * custom control panels to users. This component is a generic UI component that
@@ -40,10 +42,13 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
   const [refineNew, setRefineNew] = useState(toolboxState.getRefineNew());
   const [textPromptReplaceNew, setTextPromptReplaceNew] = useState(toolboxState.getTextPromptReplaceNew());
   const [selectedModel, setSelectedModel] = useState<'nnInteractive' | 'sam2' | 'medsam2' | 'sam3'>(toolboxState.getSelectedModel());
+  const [baselineThresholdMethod, setBaselineThresholdMethod] = useState<BaselineThresholdMethod>(toolboxState.getBaselineThresholdMethod());
   const [baselineSigma, setBaselineSigma] = useState<number>(toolboxState.getBaselineSigma());
   const [baselineClipQuantile, setBaselineClipQuantile] = useState<number>(toolboxState.getBaselineClipQuantile());
   const [baselineThresholdScale, setBaselineThresholdScale] = useState<number>(toolboxState.getBaselineThresholdScale());
-  const [baselineMinComponentSize, setBaselineMinComponentSize] = useState<number>(toolboxState.getBaselineMinComponentSize());
+  const [baselinePercentile, setBaselinePercentile] = useState<number>(toolboxState.getBaselinePercentile());
+  const [baselineLocalBlockSize, setBaselineLocalBlockSize] = useState<number>(toolboxState.getBaselineLocalBlockSize());
+  const [baselineLocalOffset, setBaselineLocalOffset] = useState<number>(toolboxState.getBaselineLocalOffset());
   const [useCurrentMaskAsSeed, setUseCurrentMaskAsSeed] = useState<boolean>(toolboxState.getUseCurrentMaskAsSeed());
   const [medgemmaResult, setMedgemmaResult] = useState(toolboxState.getMedgemmaResult());
   const [medgemmaInstruction, setMedgemmaInstruction] = useState(toolboxState.getMedgemmaInstruction());
@@ -78,10 +83,13 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
       setRefineNew(toolboxState.getRefineNew());
       setTextPromptReplaceNew(toolboxState.getTextPromptReplaceNew());
       setSelectedModel(toolboxState.getSelectedModel());
+      setBaselineThresholdMethod(toolboxState.getBaselineThresholdMethod());
       setBaselineSigma(toolboxState.getBaselineSigma());
       setBaselineClipQuantile(toolboxState.getBaselineClipQuantile());
       setBaselineThresholdScale(toolboxState.getBaselineThresholdScale());
-      setBaselineMinComponentSize(toolboxState.getBaselineMinComponentSize());
+      setBaselinePercentile(toolboxState.getBaselinePercentile());
+      setBaselineLocalBlockSize(toolboxState.getBaselineLocalBlockSize());
+      setBaselineLocalOffset(toolboxState.getBaselineLocalOffset());
       setUseCurrentMaskAsSeed(toolboxState.getUseCurrentMaskAsSeed());
       setIsLocked(toolboxState.getLocked());
     };
@@ -443,6 +451,26 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
               {isPorosityToolbox && (
                 <div className="flex flex-wrap items-end gap-2 py-2 px-1 text-xs">
                    <div className="flex items-center gap-1">
+                     <Label htmlFor="baseline-method" title="Choose the thresholding strategy used to create the baseline mask.">Method</Label>
+                     <Select
+                       value={baselineThresholdMethod}
+                       onValueChange={(value) => {
+                         const method = value as BaselineThresholdMethod;
+                         setBaselineThresholdMethod(method);
+                         toolboxState.setBaselineThresholdMethod(method);
+                       }}
+                     >
+                       <SelectTrigger id="baseline-method" className="w-[132px] h-8 text-xs" title="Choose threshold method">
+                         <SelectValue placeholder="Threshold method" />
+                       </SelectTrigger>
+                       <SelectContent>
+                         <SelectItem value="otsu">Otsu</SelectItem>
+                         <SelectItem value="percentile">Percentile</SelectItem>
+                         <SelectItem value="adaptive_mean">Adaptive Mean</SelectItem>
+                       </SelectContent>
+                     </Select>
+                   </div>
+                   <div className="flex items-center gap-1">
                      <Label htmlFor="baseline-sigma" title="Gaussian smoothing (range 0-10, step 0.1). Higher values smooth noise but can erase small pores; lower values preserve fine pores and edges.">Sigma</Label>
                      <Input
                        id="baseline-sigma"
@@ -484,47 +512,95 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        }}
                      />
                    </div>
-                   <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-threshold-scale" title="Multiplier on Otsu threshold (range 0.5-2.0, step 0.05). Higher values classify more voxels as pores (higher sensitivity); lower values are stricter and reduce false positives.">Thresh</Label>
-                     <Input
-                       id="baseline-threshold-scale"
-                       className="w-[68px] h-8 text-xs"
-                       type="number"
-                       min={0.5}
-                       max={2}
-                       step={0.05}
-                       title="Threshold scale (0.5-2.0). Increase toward 1.1-1.4 to catch more pores; decrease toward 0.70-0.95 for stricter segmentation."
-                       value={baselineThresholdScale}
-                       onChange={(e) => {
-                         const next = Number(e.target.value);
-                         if (!Number.isFinite(next)) {
-                           return;
-                         }
-                         setBaselineThresholdScale(next);
-                         toolboxState.setBaselineThresholdScale(next);
-                       }}
-                     />
-                   </div>
-                   <div className="flex items-center gap-1">
-                     <Label htmlFor="baseline-min-size" title="Minimum connected-component size in voxels (min 0, step 10). Removes small isolated pore candidates after thresholding; raise to suppress salt-and-pepper noise.">MinPx</Label>
-                     <Input
-                       id="baseline-min-size"
-                       className="w-[70px] h-8 text-xs"
-                       type="number"
-                       min={0}
-                       step={10}
-                       title="Component size filter. Use 0-50 to keep fine pores; 100+ removes tiny components/noise."
-                       value={baselineMinComponentSize}
-                       onChange={(e) => {
-                         const next = Number(e.target.value);
-                         if (!Number.isFinite(next)) {
-                           return;
-                         }
-                         setBaselineMinComponentSize(next);
-                         toolboxState.setBaselineMinComponentSize(next);
-                       }}
-                     />
-                   </div>
+                   {baselineThresholdMethod === 'otsu' && (
+                     <div className="flex items-center gap-1">
+                       <Label htmlFor="baseline-threshold-scale" title="Multiplier on the Otsu threshold (range 0.5-2.0, step 0.05). Higher values classify more voxels as pores (higher sensitivity); lower values are stricter and reduce false positives.">Scale</Label>
+                       <Input
+                         id="baseline-threshold-scale"
+                         className="w-[68px] h-8 text-xs"
+                         type="number"
+                         min={0.5}
+                         max={2}
+                         step={0.05}
+                         title="Threshold scale (0.5-2.0). Increase toward 1.1-1.4 to catch more pores; decrease toward 0.70-0.95 for stricter segmentation."
+                         value={baselineThresholdScale}
+                         onChange={(e) => {
+                           const next = Number(e.target.value);
+                           if (!Number.isFinite(next)) {
+                             return;
+                           }
+                           setBaselineThresholdScale(next);
+                           toolboxState.setBaselineThresholdScale(next);
+                         }}
+                       />
+                     </div>
+                   )}
+                   {baselineThresholdMethod === 'percentile' && (
+                     <div className="flex items-center gap-1">
+                       <Label htmlFor="baseline-percentile" title="Lower percentile thresholds more aggressively segment dark pores; higher values are stricter.">Pct</Label>
+                       <Input
+                         id="baseline-percentile"
+                         className="w-[68px] h-8 text-xs"
+                         type="number"
+                         min={0}
+                         max={100}
+                         step={1}
+                         title="Intensity percentile used as the cutoff. Typical values: 5-35 for dark pores."
+                         value={baselinePercentile}
+                         onChange={(e) => {
+                           const next = Number(e.target.value);
+                           if (!Number.isFinite(next)) {
+                             return;
+                           }
+                           setBaselinePercentile(next);
+                           toolboxState.setBaselinePercentile(next);
+                         }}
+                       />
+                     </div>
+                   )}
+                   {baselineThresholdMethod === 'adaptive_mean' && (
+                     <>
+                       <div className="flex items-center gap-1">
+                         <Label htmlFor="baseline-local-block-size" title="Odd neighborhood size used for local adaptive thresholding.">Block</Label>
+                         <Input
+                           id="baseline-local-block-size"
+                           className="w-[68px] h-8 text-xs"
+                           type="number"
+                           min={3}
+                           step={2}
+                           title="Local neighborhood size (odd integers only, e.g. 15, 21, 31). Larger values smooth more aggressively."
+                           value={baselineLocalBlockSize}
+                           onChange={(e) => {
+                             const next = Number(e.target.value);
+                             if (!Number.isFinite(next)) {
+                               return;
+                             }
+                             setBaselineLocalBlockSize(next);
+                             toolboxState.setBaselineLocalBlockSize(next);
+                           }}
+                         />
+                       </div>
+                       <div className="flex items-center gap-1">
+                         <Label htmlFor="baseline-local-offset" title="Subtracts from the adaptive local threshold; higher values make the mask more inclusive.">Offset</Label>
+                         <Input
+                           id="baseline-local-offset"
+                           className="w-[68px] h-8 text-xs"
+                           type="number"
+                           step={0.01}
+                           title="Adaptive threshold offset. Increase to include more dark voxels; decrease to be stricter."
+                           value={baselineLocalOffset}
+                           onChange={(e) => {
+                             const next = Number(e.target.value);
+                             if (!Number.isFinite(next)) {
+                               return;
+                             }
+                             setBaselineLocalOffset(next);
+                             toolboxState.setBaselineLocalOffset(next);
+                           }}
+                         />
+                       </div>
+                     </>
+                   )}
                  </div>
                 )}
               {isTextPromptToolbox && (

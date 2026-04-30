@@ -382,10 +382,13 @@ const commandsModule = ({
 
       return commandsManager.run('sam2', {
         baseline: true,
+        baselineThresholdMethod: toolboxState.getBaselineThresholdMethod(),
         baselineSigma: toolboxState.getBaselineSigma(),
         baselineClipQuantile: toolboxState.getBaselineClipQuantile(),
         baselineThresholdScale: toolboxState.getBaselineThresholdScale(),
-        baselineMinComponentSize: toolboxState.getBaselineMinComponentSize(),
+        baselinePercentile: toolboxState.getBaselinePercentile(),
+        baselineLocalBlockSize: toolboxState.getBaselineLocalBlockSize(),
+        baselineLocalOffset: toolboxState.getBaselineLocalOffset(),
       });
     },
 
@@ -907,10 +910,13 @@ const commandsModule = ({
 
     async sam2(options: {
       baseline?: boolean;
+      baselineThresholdMethod?: 'otsu' | 'percentile' | 'adaptive_mean';
       baselineSigma?: number;
       baselineClipQuantile?: number;
       baselineThresholdScale?: number;
-      baselineMinComponentSize?: number;
+      baselinePercentile?: number;
+      baselineLocalBlockSize?: number;
+      baselineLocalOffset?: number;
       useMaskSeed?: boolean;
       oneSlice?: boolean;
     } = {}) {
@@ -1327,10 +1333,13 @@ const commandsModule = ({
         nninter: false,
         medsam2: medsam2,
         baseline: useBaseline,
+        baseline_threshold_method: options.baselineThresholdMethod,
         baseline_sigma: options.baselineSigma,
         baseline_clip_quantile: options.baselineClipQuantile,
         baseline_threshold_scale: options.baselineThresholdScale,
-        baseline_min_component_size: options.baselineMinComponentSize,
+        baseline_percentile: options.baselinePercentile,
+        baseline_local_block_size: options.baselineLocalBlockSize,
+        baseline_local_offset: options.baselineLocalOffset,
         baseline_connectivity: 1,
         use_mask_seed: !useBaseline && !toolboxState.getRefineNew() && useMaskSeed,
         seed_masks: seedMasks,

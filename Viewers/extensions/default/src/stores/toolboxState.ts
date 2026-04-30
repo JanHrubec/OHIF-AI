@@ -7,10 +7,13 @@ let textPromptReplaceNew = false; // Replace/New toggle for Text Prompt Segmenta
 let selectedModel: 'nnInteractive' | 'sam2' | 'medsam2' | 'sam3' = 'medsam2'; // Default to MedSAM2
 let locked = false;
 let currentActiveSegment = 1;
+let baselineThresholdMethod: 'otsu' | 'percentile' | 'adaptive_mean' = 'otsu';
 let baselineSigma = 0.4;
 let baselineClipQuantile = 0.8;
 let baselineThresholdScale = 1.2;
-let baselineMinComponentSize = 0;
+let baselinePercentile = 20;
+let baselineLocalBlockSize = 21;
+let baselineLocalOffset = 0.02;
 let useCurrentMaskAsSeed = true;
 let medgemmaResult: string | null = null;
 let medgemmaInstruction: string = '';
@@ -61,6 +64,10 @@ export const toolboxState = {
   setCurrentActiveSegment: (segment: number) => {
     currentActiveSegment = segment;
   },
+  getBaselineThresholdMethod: () => baselineThresholdMethod,
+  setBaselineThresholdMethod: (method: 'otsu' | 'percentile' | 'adaptive_mean') => {
+    baselineThresholdMethod = method;
+  },
   getBaselineSigma: () => baselineSigma,
   setBaselineSigma: (value: number) => {
     baselineSigma = value;
@@ -73,9 +80,17 @@ export const toolboxState = {
   setBaselineThresholdScale: (value: number) => {
     baselineThresholdScale = value;
   },
-  getBaselineMinComponentSize: () => baselineMinComponentSize,
-  setBaselineMinComponentSize: (value: number) => {
-    baselineMinComponentSize = value;
+  getBaselinePercentile: () => baselinePercentile,
+  setBaselinePercentile: (value: number) => {
+    baselinePercentile = value;
+  },
+  getBaselineLocalBlockSize: () => baselineLocalBlockSize,
+  setBaselineLocalBlockSize: (value: number) => {
+    baselineLocalBlockSize = value;
+  },
+  getBaselineLocalOffset: () => baselineLocalOffset,
+  setBaselineLocalOffset: (value: number) => {
+    baselineLocalOffset = value;
   },
   getUseCurrentMaskAsSeed: () => useCurrentMaskAsSeed,
   setUseCurrentMaskAsSeed: (enabled: boolean) => {
