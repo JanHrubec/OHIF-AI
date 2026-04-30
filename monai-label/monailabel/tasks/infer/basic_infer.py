@@ -1104,7 +1104,7 @@ class BasicInferTask(InferTask):
             if unsupported_sam_prompt_count > 0:
                 warning_msg = (
                     "SAM backend supports points, positive boxes, and positive lasso/scribble as mask prompts. "
-                    "Negative boxes/negative lasso/negative scribble are ignored."
+                    "Negative boxes/negative lasso/negative scribble are applied as exclusion masks."
                 )
                 logger.warning(warning_msg)
                 result_json["warnings"] = result_json.get("warnings", []) + [warning_msg]
@@ -1147,15 +1147,45 @@ class BasicInferTask(InferTask):
             logger.info(f"len Z Y X: {len_z}, {len_y}, {len_x}")
 
             prompt_masks_by_slice: Dict[int, np.ndarray] = {}
+            neg_prompt_masks_by_slice: Dict[int, np.ndarray] = {}
 
-            def _ensure_prompt_mask(slice_idx: int):
+            def _ensure_prompt_mask(slice_idx: int, masks_by_slice: Dict[int, np.ndarray]):
                 if slice_idx < 0 or slice_idx >= len_z:
                     return None
-                if slice_idx not in prompt_masks_by_slice:
-                    prompt_masks_by_slice[slice_idx] = np.zeros((len_y, len_x), dtype=np.uint8)
-                return prompt_masks_by_slice[slice_idx]
+                if slice_idx not in masks_by_slice:
+                    masks_by_slice[slice_idx] = np.zeros((len_y, len_x), dtype=np.uint8)
+                return masks_by_slice[slice_idx]
 
-            def _add_lasso_masks(lassos):
+            def _add_box_masks(boxes, masks_by_slice: Dict[int, np.ndarray]):
+                if not isinstance(boxes, list):
+                    return
+                for box in boxes:
+                    if not isinstance(box, list) or len(box) < 2:
+                        continue
+                    try:
+                        p0 = np.asarray(box[0], dtype=np.int64)
+                        p1 = np.asarray(box[1], dtype=np.int64)
+                    except Exception:
+                        continue
+                    if p0.size < 3 or p1.size < 3:
+                        continue
+                    x0, y0, z0 = p0[:3]
+                    x1, y1, z1 = p1[:3]
+                    x_min, x_max = sorted((int(x0), int(x1)))
+                    y_min, y_max = sorted((int(y0), int(y1)))
+                    z_min, z_max = sorted((int(z0), int(z1)))
+                    x_min = max(x_min, 0)
+                    y_min = max(y_min, 0)
+                    z_min = max(z_min, 0)
+                    x_max = min(x_max, len_x - 1)
+                    y_max = min(y_max, len_y - 1)
+                    z_max = min(z_max, len_z - 1)
+                    for zz in range(z_min, z_max + 1):
+                        mask = _ensure_prompt_mask(int(zz), masks_by_slice)
+                        if mask is not None:
+                            mask[y_min : y_max + 1, x_min : x_max + 1] = 1
+
+            def _add_lasso_masks(lassos, masks_by_slice: Dict[int, np.ndarray]):
                 if not isinstance(lassos, list):
                     return
                 for lasso in lassos:
@@ -1171,11 +1201,11 @@ class BasicInferTask(InferTask):
                     x, y, z = filled[:, 0], filled[:, 1], filled[:, 2]
                     valid = (x >= 0) & (x < len_x) & (y >= 0) & (y < len_y) & (z >= 0) & (z < len_z)
                     for xx, yy, zz in zip(x[valid], y[valid], z[valid]):
-                        mask = _ensure_prompt_mask(int(zz))
+                        mask = _ensure_prompt_mask(int(zz), masks_by_slice)
                         if mask is not None:
                             mask[int(yy), int(xx)] = 1
 
-            def _add_scribble_masks(scribbles):
+            def _add_scribble_masks(scribbles, masks_by_slice: Dict[int, np.ndarray]):
                 if not isinstance(scribbles, list):
                     return
                 scribble_slices = set()
@@ -1192,23 +1222,27 @@ class BasicInferTask(InferTask):
                     x, y, z = pts[:, 0], pts[:, 1], pts[:, 2]
                     valid = (x >= 0) & (x < len_x) & (y >= 0) & (y < len_y) & (z >= 0) & (z < len_z)
                     for xx, yy, zz in zip(x[valid], y[valid], z[valid]):
-                        mask = _ensure_prompt_mask(int(zz))
+                        mask = _ensure_prompt_mask(int(zz), masks_by_slice)
                         if mask is not None:
                             mask[int(yy), int(xx)] = 1
                             scribble_slices.add(int(zz))
 
                 for slice_idx in scribble_slices:
-                    mask = prompt_masks_by_slice.get(slice_idx)
+                    mask = masks_by_slice.get(slice_idx)
                     if mask is None:
                         continue
-                    prompt_masks_by_slice[slice_idx] = ndimage.binary_dilation(
+                    masks_by_slice[slice_idx] = ndimage.binary_dilation(
                         mask.astype(bool),
                         structure=np.ones((3, 3), dtype=bool),
                         iterations=1,
                     ).astype(np.uint8)
 
-            _add_lasso_masks(result_json.get("pos_lassos", []))
-            _add_scribble_masks(result_json.get("pos_scribbles", []))
+            _add_box_masks(result_json.get("neg_boxes", []), neg_prompt_masks_by_slice)
+            _add_lasso_masks(result_json.get("neg_lassos", []), neg_prompt_masks_by_slice)
+            _add_scribble_masks(result_json.get("neg_scribbles", []), neg_prompt_masks_by_slice)
+
+            _add_lasso_masks(result_json.get("pos_lassos", []), prompt_masks_by_slice)
+            _add_scribble_masks(result_json.get("pos_scribbles", []), prompt_masks_by_slice)
             
             file_name = data['image'].split('/')[-1]
             frame_names = []
@@ -1332,6 +1366,7 @@ class BasicInferTask(InferTask):
                                 ann_frame_values.add(frame_idx)
 
             ann_frame_values.update(prompt_masks_by_slice.keys())
+            ann_frame_values.update(neg_prompt_masks_by_slice.keys())
 
             if use_mask_seed:
                 ann_frame_values.update(
@@ -1397,6 +1432,15 @@ class BasicInferTask(InferTask):
                             if merged_mask_prompt is None
                             else np.maximum(merged_mask_prompt, prompt_mask)
                         )
+
+                if value in neg_prompt_masks_by_slice:
+                    neg_prompt_mask = neg_prompt_masks_by_slice[value]
+                    if neg_prompt_mask is not None and np.any(neg_prompt_mask > 0):
+                        merged_mask_prompt = (
+                            np.zeros((len_y, len_x), dtype=np.uint8)
+                            if merged_mask_prompt is None
+                            else np.where(neg_prompt_mask > 0, 0, merged_mask_prompt)
+                        ).astype(np.uint8)
 
                 if merged_mask_prompt is not None and np.any(merged_mask_prompt > 0):
                     with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):

@@ -1114,12 +1114,10 @@ const commandsModule = ({
         pos_points.length > 0 ||
         neg_points.length > 0 ||
         pos_boxes.length > 0 ||
-        pos_lassos.length > 0 ||
-        pos_scribbles.length > 0;
-
-      const hasUnsupportedSamPromptInputs =
         neg_boxes.length > 0 ||
+        pos_lassos.length > 0 ||
         neg_lassos.length > 0 ||
+        pos_scribbles.length > 0 ||
         neg_scribbles.length > 0;
 
       let seedMasks: Array<{ slice: number; indices: number[] }> = [];
@@ -1142,6 +1140,13 @@ const commandsModule = ({
             }
           });
         });
+        neg_boxes.forEach(box => {
+          box?.forEach(point => {
+            if (Number.isFinite(point?.[2])) {
+              promptSlices.add(point[2]);
+            }
+          });
+        });
         const collectPromptPolylineSlices = (polylines: any[]) => {
           polylines.forEach(polyline => {
             if (!Array.isArray(polyline)) {
@@ -1155,7 +1160,9 @@ const commandsModule = ({
           });
         };
         collectPromptPolylineSlices(pos_lassos as any[]);
+        collectPromptPolylineSlices(neg_lassos as any[]);
         collectPromptPolylineSlices(pos_scribbles as any[]);
+        collectPromptPolylineSlices(neg_scribbles as any[]);
 
         const labelmapImageIds =
           activeSegmentation?.representationData?.Labelmap?.imageIds || [];
@@ -1282,28 +1289,19 @@ const commandsModule = ({
       if (!useBaseline && !hasSupportedSamPromptInputs && !hasSeedInputs && text_prompts.length == 0){
         uiNotificationService.show({
           title: 'Input warning',
-          message: 'Provide point/positive-box prompts or enable mask seed with an active segment to run SAM refinement',
+          message: 'Provide point, box, lasso, or scribble prompts, or enable mask seed with an active segment, to run SAM refinement',
           type: 'warning',
           duration: 4000,
         });
         return;
       }
 
-      if (!useBaseline && hasUnsupportedSamPromptInputs) {
-        uiNotificationService.show({
-          title: 'Unsupported SAM prompts',
-          message: 'Negative boxes, negative lassos, and negative scribbles are not supported by SAM inference and will be ignored.',
-          type: 'warning',
-          duration: 5000,
-        });
-      }
-
       if (!useBaseline) {
         uiNotificationService.show({
           title: 'Prompt info',
           message: hasSeedInputs
-            ? 'SAM refinement uses mask seeds plus supported prompts (points, positive boxes, positive lassos/scribbles as mask prompts).'
-            : 'SAM refinement uses supported prompts (points, positive boxes, positive lassos/scribbles as mask prompts).',
+            ? 'SAM refinement uses mask seeds plus prompts from points, boxes, lassos, and scribbles, including negative prompts.'
+            : 'SAM refinement uses prompts from points, boxes, lassos, and scribbles, including negative prompts.',
           type: 'info',
           duration: 4000,
         });
