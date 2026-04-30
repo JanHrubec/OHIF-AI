@@ -1276,21 +1276,6 @@ const commandsModule = ({
       //.filter(e => { return e.toolName === 'Probe2' && e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID && e.metadata.neg === false && e.metadata.SegmentNumber === segmentNumber; })
       //.map(e => { return e.label })
 
-      // Hide the measurements after inference
-      for (let i = 0; i < currentMeasurements.length; i++) {
-        const e = currentMeasurements[i];
-        if (e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID) {
-          measurementService.toggleVisibilityMeasurement(e.uid, false);
-        }
-      }
-
-      // Force a re-render of the segmentation table after a short delay
-      setTimeout(() => {
-        // This will trigger a re-render of components that depend on measurement state
-        const event = new Event('measurement-state-changed');
-        document.dispatchEvent(event);
-      }, 200);
-
       const hasSeedInputs = seedMasks.length > 0;
       if (!useBaseline && !hasSupportedSamPromptInputs && !hasSeedInputs && text_prompts.length == 0){
         uiNotificationService.show({
@@ -1312,6 +1297,25 @@ const commandsModule = ({
           duration: 4000,
         });
       }
+
+      // Store measurements to be hidden and re-enabled after processing
+      const hiddenMeasurementIds: string[] = [];
+      
+      // Hide the measurements during inference
+      for (let i = 0; i < currentMeasurements.length; i++) {
+        const e = currentMeasurements[i];
+        if (e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID) {
+          hiddenMeasurementIds.push(e.uid);
+          measurementService.toggleVisibilityMeasurement(e.uid, false);
+        }
+      }
+
+      // Force a re-render of the segmentation table after a short delay
+      setTimeout(() => {
+        // This will trigger a re-render of components that depend on measurement state
+        const event = new Event('measurement-state-changed');
+        document.dispatchEvent(event);
+      }, 200);
 
       let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params: Record<string, unknown> = {
@@ -1653,6 +1657,14 @@ const commandsModule = ({
         console.error('Segmentation error:', error);
         throw error;
       } finally {
+        // Re-enable measurements to restore legacy tool visibility
+        for (const measurementId of hiddenMeasurementIds) {
+          measurementService.toggleVisibilityMeasurement(measurementId, true);
+        }
+
+        const restoreEvent = new Event('measurement-state-changed');
+        document.dispatchEvent(restoreEvent);
+        
         // Unlock toolbox after command completes (success or failure)
         // This allows brush/eraser/threshold tools to be reactivated
         toolboxState.setLocked(false);
@@ -2032,10 +2044,14 @@ const commandsModule = ({
           .map(e => { return e.label });
       }
 
-      // Hide the measurements after inference
+      // Store measurements to be hidden and re-enabled after processing
+      const hiddenMeasurementIds: string[] = [];
+      
+      // Hide the measurements during inference
       for (let i = 0; i < currentMeasurements.length; i++) {
         const e = currentMeasurements[i];
         if (e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID) {
+          hiddenMeasurementIds.push(e.uid);
           measurementService.toggleVisibilityMeasurement(e.uid, false);
         }
       }
@@ -2373,6 +2389,14 @@ const commandsModule = ({
         console.error('Nninter segmentation error:', error);
         throw error;
       } finally {
+        // Re-enable measurements to restore legacy tool visibility
+        for (const measurementId of hiddenMeasurementIds) {
+          measurementService.toggleVisibilityMeasurement(measurementId, true);
+        }
+
+        const restoreEvent = new Event('measurement-state-changed');
+        document.dispatchEvent(restoreEvent);
+        
         // Unlock toolbox after command completes (success or failure)
         // This allows brush/eraser/threshold tools to be reactivated
         toolboxState.setLocked(false);
