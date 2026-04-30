@@ -1240,7 +1240,6 @@ class BasicInferTask(InferTask):
             _add_box_masks(result_json.get("neg_boxes", []), neg_prompt_masks_by_slice)
             _add_lasso_masks(result_json.get("neg_lassos", []), neg_prompt_masks_by_slice)
             _add_scribble_masks(result_json.get("neg_scribbles", []), neg_prompt_masks_by_slice)
-
             _add_lasso_masks(result_json.get("pos_lassos", []), prompt_masks_by_slice)
             _add_scribble_masks(result_json.get("pos_scribbles", []), prompt_masks_by_slice)
             
