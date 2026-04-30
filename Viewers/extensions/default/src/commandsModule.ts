@@ -929,6 +929,15 @@ const commandsModule = ({
       const medsam2 = selectedModel //Check at monailabel server;
       const start = Date.now();
       
+      // Store the currently active tool so it can be restored after processing
+      let previousActiveTool = null;
+      try {
+        const toolGroupService = servicesManager.services.toolGroupService;
+        previousActiveTool = toolGroupService?.getActivePrimaryMouseButtonTool?.();
+      } catch (e) {
+        console.warn('Could not get active tool:', e);
+      }
+      
       const segs = servicesManager.services.segmentationService.getSegmentations()
       const { activeViewportId, viewports } = viewportGridService.getState();
       const activeViewportSpecificData = viewports.get(activeViewportId);
@@ -1665,6 +1674,16 @@ const commandsModule = ({
         const restoreEvent = new Event('measurement-state-changed');
         document.dispatchEvent(restoreEvent);
         
+        // Restore the previously active tool (e.g., Brush, Eraser)
+        // This ensures drawing tools are functional after AI processing completes
+        if (previousActiveTool && previousActiveTool !== 'Pan') {
+          try {
+            commandsManager?.run?.('setToolActive', { toolName: previousActiveTool });
+          } catch (e) {
+            console.warn('Could not restore active tool:', e);
+          }
+        }
+        
         // Unlock toolbox after command completes (success or failure)
         // This allows brush/eraser/threshold tools to be reactivated
         toolboxState.setLocked(false);
@@ -1876,6 +1895,15 @@ const commandsModule = ({
 
       const overlap = false
       const start = Date.now();
+      
+      // Store the currently active tool so it can be restored after processing
+      let previousActiveTool = null;
+      try {
+        const toolGroupService = servicesManager.services.toolGroupService;
+        previousActiveTool = toolGroupService?.getActivePrimaryMouseButtonTool?.();
+      } catch (e) {
+        console.warn('Could not get active tool:', e);
+      }
       
       const { activeViewportId, viewports } = viewportGridService.getState();
       const activeViewportSpecificData = viewports.get(activeViewportId);
@@ -2396,6 +2424,16 @@ const commandsModule = ({
 
         const restoreEvent = new Event('measurement-state-changed');
         document.dispatchEvent(restoreEvent);
+        
+        // Restore the previously active tool (e.g., Brush, Eraser)
+        // This ensures drawing tools are functional after AI processing completes
+        if (previousActiveTool && previousActiveTool !== 'Pan') {
+          try {
+            commandsManager?.run?.('setToolActive', { toolName: previousActiveTool });
+          } catch (e) {
+            console.warn('Could not restore active tool:', e);
+          }
+        }
         
         // Unlock toolbox after command completes (success or failure)
         // This allows brush/eraser/threshold tools to be reactivated
