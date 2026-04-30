@@ -205,6 +205,7 @@ const commandsModule = ({
     toolboxState.setCurrentActiveSegment(segmentNumber);
     await servicesManager.services.segmentationService.addSegmentationRepresentation(activeViewportId, {
       segmentationId: segmentationId,
+      type: LABELMAP,
     });
     
     if (toolboxState.getRefineNew()) {
