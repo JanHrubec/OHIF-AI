@@ -413,7 +413,6 @@ export function Toolbox({ buttonSectionId, title, defaultOpen = true }: { button
                        onCheckedChange={(checked) => {
                         setUseCurrentMaskAsSeed(checked);
                         toolboxState.setUseCurrentMaskAsSeed(checked);
-                        console.log('Use current mask as seed:', checked);
                       }}
                      />
                    </div>
