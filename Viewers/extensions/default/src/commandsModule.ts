@@ -1643,6 +1643,10 @@ const commandsModule = ({
       } catch (error) {
         console.error('Segmentation error:', error);
         throw error;
+      } finally {
+        // Unlock toolbox after command completes (success or failure)
+        // This allows brush/eraser/threshold tools to be reactivated
+        toolboxState.setLocked(false);
       }
     },
     async initNninter( options: {viewportId: string} = {viewportId: undefined} ){
@@ -1710,6 +1714,10 @@ const commandsModule = ({
       } catch (error) {
         console.error('Init nninter error:', error);
         throw error;
+      } finally {
+        // Unlock toolbox after command completes (success or failure)
+        // This allows brush/eraser/threshold tools to be reactivated
+        toolboxState.setLocked(false);
       }
 
     },
@@ -1771,6 +1779,10 @@ const commandsModule = ({
       } catch (error) {
         console.error('Reset nninter error:', error);
         throw error;
+      } finally {
+        // Unlock toolbox after command completes (success or failure)
+        // This allows brush/eraser/threshold tools to be reactivated
+        toolboxState.setLocked(false);
       }
     },
     async medGemma(query: string, instruction?: string, startSlice?: number, endSlice?: number) {
@@ -1830,6 +1842,10 @@ const commandsModule = ({
       } catch (error) {
         console.error('Medgemma error:', error);
         throw error;
+      } finally {
+        // Unlock toolbox after command completes (success or failure)
+        // This allows brush/eraser/threshold tools to be reactivated
+        toolboxState.setLocked(false);
       }
     },
     async nninter(textPrompts?: string | string[]) {
@@ -2347,6 +2363,10 @@ const commandsModule = ({
       } catch (error) {
         console.error('Nninter segmentation error:', error);
         throw error;
+      } finally {
+        // Unlock toolbox after command completes (success or failure)
+        // This allows brush/eraser/threshold tools to be reactivated
+        toolboxState.setLocked(false);
       }
     },
 
