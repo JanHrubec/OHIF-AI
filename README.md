@@ -376,6 +376,36 @@ If you use OHIF-AI in your research, please cite:
 
 ---
 
+## 🧭 Porosity branch review (porosity vs main)
+
+This section tracks issues found while comparing the porosity branch to main, plus a consolidated plan to fix them in a minimal, well‑integrated way.
+
+### Problems observed (status)
+
+- [Resolved] Baseline segmentation can create a new segmentation container with a blank label because the current series label is empty and the matching logic relies on `cachedStats.seriesInstanceUid`/`algorithmType`, which are often missing for manual segmentations. The baseline action should update the active segmentation/segment instead of branching into a new container. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+- [Resolved] The Seed Mask toggle does not actually disable mask seeding when refining the current segment. `useMaskSeed` is forced to `true` whenever `Refine` is active, making the toggle ineffective. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts), [Viewers/extensions/default/src/utils/Toolbox.tsx](Viewers/extensions/default/src/utils/Toolbox.tsx), and [Viewers/extensions/default/src/stores/toolboxState.ts](Viewers/extensions/default/src/stores/toolboxState.ts).
+- [Resolved] Legacy tools (Brush/Eraser/Threshold) can appear enabled but do nothing on AI/baseline segments because the pipeline mutates `csToolsSegmentation` directly and can desynchronize the `SegmentationService` and tool groups. This is the most likely cause of “tools do nothing” after AI/baseline runs. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts), [Viewers/extensions/cornerstone/src/services/SegmentationService/SegmentationService.ts](Viewers/extensions/cornerstone/src/services/SegmentationService/SegmentationService.ts), and [Viewers/modes/longitudinal/src/toolbarButtons.ts](Viewers/modes/longitudinal/src/toolbarButtons.ts). (Pending verification in UI.)
+- [Resolved] Segmentation payload decoding and measurement hide/restore logic is duplicated in multiple branches (`sam2`/`nninter`), increasing maintenance and raising the risk of inconsistent behavior. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+- [Resolved] DICOM SEG export reindexes `SegmentNumber` without remapping the labelmap pixel values, which can cause metadata-to-pixel mismatches for non-contiguous segment indices. See [Viewers/extensions/cornerstone-dicom-seg/src/commandsModule.ts](Viewers/extensions/cornerstone-dicom-seg/src/commandsModule.ts).
+- [Resolved] Export gating now sets `isExportable: true` universally, which can surface DICOM export options even when reconstruction is not possible. TIFF exports are fine, but DICOM SEG should remain gated. See [Viewers/extensions/cornerstone/src/panels/PanelSegmentation.tsx](Viewers/extensions/cornerstone/src/panels/PanelSegmentation.tsx).
+- [Resolved] Default model changed to `medsam2` and new porosity toolbox defaults alter behavior versus main; this should be intentional and explicitly communicated. See [Viewers/extensions/default/src/stores/toolboxState.ts](Viewers/extensions/default/src/stores/toolboxState.ts) and [Viewers/extensions/default/src/utils/Toolbox.tsx](Viewers/extensions/default/src/utils/Toolbox.tsx).
+
+### Plan to fix (minimal + coherent)
+
+1. **Unify segmentation targeting**: implement a single helper that resolves the active segmentation/segment and always reuses it unless the user explicitly selects New. Ensure `cachedStats.seriesInstanceUid` is set on segmentation creation and fall back to a safe label when `SeriesDescription` is empty. Apply this to baseline and AI flows. **Status: Done**.
+2. **Make Seed Mask toggle effective**: compute `useMaskSeed` from the toggle even in `Refine` mode, and explicitly override only in `propagateCurrentMask` (which should force mask seeding). Update UI hints to reflect when mask seeding is forced. **Status: Done**.
+3. **Restore legacy tool compatibility**: stop mutating `csToolsSegmentation` directly and instead update through `SegmentationService` APIs, keeping tool groups and active segmentation state consistent. Avoid `clearSegmentationRepresentations` unless necessary; when used, re-add representations through the service for all viewports. **Status: Done (verify in UI)**.
+4. **Deduplicate inference post-processing**: extract payload decoding and measurement hide/restore into shared helpers so `sam2` and `nninter` follow identical logic, reducing regressions. **Status: Done**.
+
+5. **Fix export correctness**: keep TIFF exports always available but gate DICOM SEG exports on reconstructability; if segment indices are renumbered, remap pixel values to match metadata or retain original indices. **Status: Done**.
+6. **Explicit defaults and UX**: confirm whether `medsam2` should be the default model and document the rationale; otherwise revert to the previous default or make it user-configurable. **Status: Done (reverted to nnInteractive)**.
+
+### Warnings
+
+- Legacy Brush/Eraser/Threshold behavior on AI/baseline segments needs runtime verification after these changes. If tools still appear active but do nothing, inspect labelmap representation state and tool group bindings. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+
+---
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
