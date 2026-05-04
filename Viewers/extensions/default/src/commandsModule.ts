@@ -19,7 +19,7 @@ import { useToggleOneUpViewportGridStore } from './stores/useToggleOneUpViewport
 import requestDisplaySetCreationForStudy from './Panels/requestDisplaySetCreationForStudy';
 import promptSaveReport from './utils/promptSaveReport';
 
-import { Enums as csToolsEnums, Types as cstTypes, segmentation as csToolsSegmentation } from '@cornerstonejs/tools';
+import { Enums as csToolsEnums, Types as cstTypes } from '@cornerstonejs/tools';
 import { updateLabelmapSegmentationImageReferences } from '@cornerstonejs/tools/segmentation/updateLabelmapSegmentationImageReferences';
 import { cache, imageLoader, metaData, Types as csTypes, utilities as csUtils, VolumeViewport3D, eventTarget } from '@cornerstonejs/core';
 import { adaptersSEG } from '@cornerstonejs/adapters';
@@ -129,34 +129,36 @@ const commandsModule = ({
     // Get the representations for the segmentation to recover the visibility of the segments
     const representations = servicesManager.services.segmentationService.getSegmentationRepresentations(activeViewportId, { segmentationId });
     
+    const segmentationLabel =
+      (currentDisplaySets?.SeriesDescription || '').trim() ||
+      currentDisplaySets?.SeriesInstanceUID ||
+      `Segmentation ${segmentationId.slice(0, 8)}`;
+
     if (segmentNumber === 1 && Object.keys(existingSegments).length === 0 && !existing) {
-      csToolsSegmentation.addSegmentations([
-        {
-          segmentationId,
-          representation: {
-            type: LABELMAP,
-            data: {
-              imageIds: derivedImageIds,
-              referencedVolumeId: currentDisplaySets.displaySetInstanceUID,
-              referencedImageIds: imageIds,
-            }
+      servicesManager.services.segmentationService.addOrUpdateSegmentation({
+        segmentationId,
+        representation: {
+          type: LABELMAP,
+          data: {
+            imageIds: derivedImageIds,
+            referencedVolumeId: currentDisplaySets.displaySetInstanceUID,
+            referencedImageIds: imageIds,
           },
-          config: {
-            cachedStats: {
-              center: z_range.length > 0 ? z_range.reduce((sum, z) => sum + z, 0) / z_range.length : 0
-            },
-            label: currentDisplaySets.SeriesDescription,
-            segments,
+        },
+        config: {
+          cachedStats: {
+            center: z_range.length > 0 ? z_range.reduce((sum, z) => sum + z, 0) / z_range.length : 0,
+            seriesInstanceUid: currentDisplaySets?.SeriesInstanceUID,
           },
-        }
-      ]);
+          label: segmentationLabel,
+          segments,
+        },
+      });
     } else {
-      // Comment out at the moment (necessary for hiding previous segments), may need to uncomment some weird bugs.
-      servicesManager.services.segmentationService.clearSegmentationRepresentations(activeViewportId);
       const readableText = customizationService.getCustomization('panelSegmentation.readableText');
 
       // Get existing segmentation to preserve other representation data
-      const existingSegmentation = csToolsSegmentation.state.getSegmentation(segmentationId);
+      const existingSegmentation = servicesManager.services.segmentationService.getSegmentation(segmentationId);
       const existingRepresentationData = existingSegmentation?.representationData || {};
       const existingLabelmapData = existingRepresentationData[LABELMAP] || {};
       
@@ -170,23 +172,23 @@ const commandsModule = ({
       }
       
       // Update the segmentation data, preserving other representation data (but not Surface)
-      csToolsSegmentation.updateSegmentations([
-        {
-          segmentationId,
-          payload: {
-            segments: segments,
-            representationData: {
-              ...updatedRepresentationData, // Surface data removed to force regeneration
-              [LABELMAP]: {
-                ...existingLabelmapData, // Preserve existing labelmap data (e.g., volumeId)
-                imageIds: derivedImageIds,
-                referencedVolumeId: currentDisplaySets.displaySetInstanceUID,
-                referencedImageIds: imageIds,
-              }
-            }
+      servicesManager.services.segmentationService.addOrUpdateSegmentation({
+        segmentationId,
+        segments: segments,
+        cachedStats: {
+          ...(existingSegmentation?.cachedStats || {}),
+          seriesInstanceUid: currentDisplaySets?.SeriesInstanceUID,
+        },
+        representationData: {
+          ...updatedRepresentationData, // Surface data removed to force regeneration
+          [LABELMAP]: {
+            ...existingLabelmapData, // Preserve existing labelmap data (e.g., volumeId)
+            imageIds: derivedImageIds,
+            referencedVolumeId: currentDisplaySets.displaySetInstanceUID,
+            referencedImageIds: imageIds,
           },
         },
-      ]);
+      });
       
       // Update the segmentation stats
       Promise.resolve().then(() => 
@@ -348,6 +350,65 @@ const commandsModule = ({
     bytesPerVoxel: number
   ): number => {
     return payloadLength - numSlices * voxelsPerSlice * bytesPerVoxel;
+  };
+
+  const getBytesPerVoxelWithWarning = (
+    images: Array<{ voxelManager?: csTypes.IVoxelManager<number> }>,
+    payload: Uint8Array,
+    payloadMismatchNotifiedRef: { value: boolean }
+  ): number => {
+    const firstVoxelsPerSlice =
+      (images[0]?.voxelManager as csTypes.IVoxelManager<number>)?.getScalarData?.()
+        ?.length || 0;
+    const bytesPerVoxel = inferBytesPerVoxel(
+      payload.length,
+      images.length,
+      firstVoxelsPerSlice
+    );
+    const payloadSizeDelta = getPayloadSizeDelta(
+      payload.length,
+      images.length,
+      firstVoxelsPerSlice,
+      bytesPerVoxel
+    );
+    if (payloadSizeDelta !== 0 && !payloadMismatchNotifiedRef.value) {
+      payloadMismatchNotifiedRef.value = true;
+      uiNotificationService.show({
+        title: 'Segmentation payload warning',
+        message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
+        type: 'warning',
+        duration: 5000,
+      });
+    }
+    return bytesPerVoxel;
+  };
+
+  const hideMeasurementsForSeries = (seriesInstanceUID: string): string[] => {
+    const hiddenMeasurementIds: string[] = [];
+    const measurements = measurementService.getMeasurements();
+    for (let i = 0; i < measurements.length; i++) {
+      const measurement = measurements[i];
+      if (measurement.referenceSeriesUID === seriesInstanceUID) {
+        hiddenMeasurementIds.push(measurement.uid);
+        measurementService.toggleVisibilityMeasurement(measurement.uid, false);
+      }
+    }
+
+    setTimeout(() => {
+      const event = new Event('measurement-state-changed');
+      document.dispatchEvent(event);
+    }, 200);
+
+    return hiddenMeasurementIds;
+  };
+
+  const restoreMeasurements = (measurementIds: string[]) => {
+    for (const measurementId of measurementIds) {
+      measurementService.toggleVisibilityMeasurement(measurementId, true);
+    }
+
+    const restoreEvent = new Event('measurement-state-changed');
+    document.dispatchEvent(restoreEvent);
   };
 
   const actions = {
@@ -926,6 +987,7 @@ const commandsModule = ({
       }
 
       const overlap = false
+      const useBaseline = options.baseline === true;
       const selectedModel = toolboxState.getSelectedModel();
       const medsam2 = selectedModel //Check at monailabel server;
       const start = Date.now();
@@ -982,68 +1044,74 @@ const commandsModule = ({
     const activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId)
     let segmentNumber = 1;
     let segments: { [segmentIndex: string]: cstTypes.Segment } = {};
-    let segmentationId = `${csUtils.uuidv4()}`
+    let segmentationId = activeSegmentation?.segmentationId || `${csUtils.uuidv4()}`
+
+    if (useBaseline && toolboxState.getRefineNew()) {
+      toolboxState.setRefineNew(false);
+    }
+
     if (activeSegmentation !== undefined){
-      segments = activeSegmentation.segments;
-    if (Object.values(segments).length > 0) {
-      // Find the minimum available segment number
-      const existingSegmentNumbers = Object.values(segments).map(e => e.segmentIndex).sort((a, b) => a - b);
+      segments = activeSegmentation.segments || {};
+
+      const existingSegmentNumbers = Object.values(segments)
+        .map(e => e.segmentIndex)
+        .sort((a, b) => a - b);
       let minAvailableNumber = 1;
-      // Find the first gap in segment numbers, or use the next number after the highest
       for (let i = 0; i < existingSegmentNumbers.length; i++) {
         if (existingSegmentNumbers[i] !== minAvailableNumber) {
           break;
         }
         minAvailableNumber++;
       }
-      segmentNumber = minAvailableNumber;
-      if (!toolboxState.getRefineNew()) {
-        const activeSegment = servicesManager.services.segmentationService.getActiveSegment(activeViewportId);
+
+      const activeSegment = servicesManager.services.segmentationService.getActiveSegment(activeViewportId);
+      const shouldUseActiveSegment = (!toolboxState.getRefineNew() || useBaseline);
+
+      if (shouldUseActiveSegment) {
         if (activeSegment !== undefined){
+          segmentNumber = activeSegment.segmentIndex;
           for (let i = 0; i < unAssignedMeasurements.length; i++) {
             const e = unAssignedMeasurements[i];
             e.metadata.SegmentNumber = activeSegment.segmentIndex;
             e.metadata.segmentationId = activeSegmentation.segmentationId;
           }
-          segmentNumber = activeSegment.segmentIndex;
+
           if (toolboxState.getCurrentActiveSegment() !== segmentNumber){
             await commandsManager.run('resetNninter');
             toolboxState.setCurrentActiveSegment(segmentNumber);
           }
-        } else {
+        } else if (Object.values(segments).length > 0) {
           uiNotificationService.show({
-            title: 'Click Segment to refine',
-            message: 'No active segment found, please click segment to refine',
+            title: 'Select a segment',
+            message: 'Choose an active segment to refine before running segmentation.',
             type: 'warning',
             duration: 4000,
           });
-          return
+          return;
         }
       } else {
-        // For new Segment
+        segmentNumber = minAvailableNumber;
         for (let i = 0; i < unAssignedMeasurements.length; i++) {
           const e = unAssignedMeasurements[i];
           e.metadata.SegmentNumber = segmentNumber;
           e.metadata.segmentationId = activeSegmentation.segmentationId;
         }
       }
-    } else{
-      // No existing segments in current active segmentation
+
+      if (Object.values(segments).length === 0) {
+        for (let i = 0; i < unAssignedMeasurements.length; i++) {
+          const e = unAssignedMeasurements[i];
+          e.metadata.SegmentNumber = segmentNumber;
+          e.metadata.segmentationId = activeSegmentation.segmentationId;
+        }
+      }
+    } else {
       for (let i = 0; i < unAssignedMeasurements.length; i++) {
         const e = unAssignedMeasurements[i];
         e.metadata.SegmentNumber = segmentNumber;
-        e.metadata.segmentationId = activeSegmentation.segmentationId;
+        e.metadata.segmentationId = segmentationId;
       }
     }
-    
-  } else {
-    // No existing segmentation
-    for (let i = 0; i < unAssignedMeasurements.length; i++) {
-      const e = unAssignedMeasurements[i];
-      e.metadata.SegmentNumber = segmentNumber;
-      e.metadata.segmentationId = segmentationId;
-    }
-  }
 
       const measuredPosPoints = currentMeasurements
         .filter(e => {
@@ -1117,14 +1185,9 @@ const commandsModule = ({
         .filter(Boolean)
 
 
-      const useBaseline = options.baseline === true;
-      const shouldRefineCurrentMask = !useBaseline && !toolboxState.getRefineNew();
-      const useMaskSeed =
-        shouldRefineCurrentMask
-          ? true
-          : options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed();
-      const preserveExistingSegmentMask =
-        shouldRefineCurrentMask && useMaskSeed;
+      const shouldRefineCurrentMask = (!toolboxState.getRefineNew() || useBaseline);
+      const useMaskSeed = !useBaseline && (options.useMaskSeed ?? toolboxState.getUseCurrentMaskAsSeed());
+      const preserveExistingSegmentMask = shouldRefineCurrentMask && useMaskSeed;
 
       const hasSupportedSamPromptInputs =
         pos_points.length > 0 ||
@@ -1308,24 +1371,9 @@ const commandsModule = ({
         });
       }
 
-      // Store measurements to be hidden and re-enabled after processing
-      const hiddenMeasurementIds: string[] = [];
-      
-      // Hide the measurements during inference
-      for (let i = 0; i < currentMeasurements.length; i++) {
-        const e = currentMeasurements[i];
-        if (e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID) {
-          hiddenMeasurementIds.push(e.uid);
-          measurementService.toggleVisibilityMeasurement(e.uid, false);
-        }
-      }
-
-      // Force a re-render of the segmentation table after a short delay
-      setTimeout(() => {
-        // This will trigger a re-render of components that depend on measurement state
-        const event = new Event('measurement-state-changed');
-        document.dispatchEvent(event);
-      }, 200);
+      const hiddenMeasurementIds = hideMeasurementsForSeries(
+        currentDisplaySets.SeriesInstanceUID
+      );
 
       let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params: Record<string, unknown> = {
@@ -1355,7 +1403,7 @@ const commandsModule = ({
         baseline_local_block_size: options.baselineLocalBlockSize,
         baseline_local_offset: options.baselineLocalOffset,
         baseline_connectivity: 1,
-        use_mask_seed: !useBaseline && !toolboxState.getRefineNew() && useMaskSeed,
+        use_mask_seed: !useBaseline && useMaskSeed,
         seed_masks: seedMasks,
       };
 
@@ -1417,7 +1465,7 @@ const commandsModule = ({
           const label_name = meta.label_name
           const raw = seg
           const new_arrayBuffer = new Uint8Array(raw);
-          let payloadMismatchNotified = false;
+          const payloadMismatchNotifiedRef = { value: false };
 
           let imageIds = currentDisplaySets.imageIds
           let existingSegments: { [segmentIndex: string]: cstTypes.Segment } = {};
@@ -1440,10 +1488,12 @@ const commandsModule = ({
             }
             
             const canForceRefineOnActiveSegmentation = shouldRefineCurrentMask && useMaskSeed;
-            if (
+            const shouldReuseActiveSegmentation =
+              useBaseline ||
+              shouldRefineCurrentMask ||
               existingseriesInstanceUid === currentDisplaySets.SeriesInstanceUID ||
-              canForceRefineOnActiveSegmentation
-            ) {
+              canForceRefineOnActiveSegmentation;
+            if (shouldReuseActiveSegmentation) {
               existingSegments = activeSegmentation.segments || {};
               segmentationId = activeSegmentation.segmentationId;
               segImageIds = activeSegmentation.representationData.Labelmap.imageIds;
@@ -1464,24 +1514,11 @@ const commandsModule = ({
             derivedImages_new.reverse();
           }
           console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
-          const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
-            ?.getScalarData()?.length || 0);
-          const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
-          const payloadSizeDelta = getPayloadSizeDelta(
-            new_arrayBuffer.length,
-            derivedImages_new.length,
-            firstVoxelsPerSlice,
-            bytesPerVoxel
+          const bytesPerVoxel = getBytesPerVoxelWithWarning(
+            derivedImages_new,
+            new_arrayBuffer,
+            payloadMismatchNotifiedRef
           );
-          if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
-            payloadMismatchNotified = true;
-            uiNotificationService.show({
-              title: 'Segmentation payload warning',
-              message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
-              type: 'warning',
-              duration: 5000,
-            });
-          }
           for (let i = 0; i < derivedImages_new.length; i++) {
             const voxelManager = derivedImages_new[i]
               .voxelManager as csTypes.IVoxelManager<number>;
@@ -1540,24 +1577,11 @@ const commandsModule = ({
               derivedImages_new.reverse();
             }
             console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
-            const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
-              ?.getScalarData()?.length || 0);
-            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
-            const payloadSizeDelta = getPayloadSizeDelta(
-              new_arrayBuffer.length,
-              derivedImages_new.length,
-              firstVoxelsPerSlice,
-              bytesPerVoxel
+            const bytesPerVoxel = getBytesPerVoxelWithWarning(
+              derivedImages_new,
+              new_arrayBuffer,
+              payloadMismatchNotifiedRef
             );
-            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
-              payloadMismatchNotified = true;
-              uiNotificationService.show({
-                title: 'Segmentation payload warning',
-                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
-                type: 'warning',
-                duration: 5000,
-              });
-            }
             for (let i = 0; i < derivedImages_new.length; i++) {
               const voxelManager = derivedImages_new[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
@@ -1581,24 +1605,11 @@ const commandsModule = ({
             if(flipped){
               merged_derivedImages.reverse();
             }
-            const firstVoxelsPerSlice = ((merged_derivedImages[0]?.voxelManager as csTypes.IVoxelManager<number>)
-              ?.getScalarData()?.length || 0);
-            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, merged_derivedImages.length, firstVoxelsPerSlice);
-            const payloadSizeDelta = getPayloadSizeDelta(
-              new_arrayBuffer.length,
-              merged_derivedImages.length,
-              firstVoxelsPerSlice,
-              bytesPerVoxel
+            const bytesPerVoxel = getBytesPerVoxelWithWarning(
+              merged_derivedImages,
+              new_arrayBuffer,
+              payloadMismatchNotifiedRef
             );
-            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
-              payloadMismatchNotified = true;
-              uiNotificationService.show({
-                title: 'Segmentation payload warning',
-                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
-                type: 'warning',
-                duration: 5000,
-              });
-            }
             for (let i = 0; i < merged_derivedImages.length; i++) {
               const voxelManager = merged_derivedImages[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
@@ -1668,12 +1679,7 @@ const commandsModule = ({
         throw error;
       } finally {
         // Re-enable measurements to restore legacy tool visibility
-        for (const measurementId of hiddenMeasurementIds) {
-          measurementService.toggleVisibilityMeasurement(measurementId, true);
-        }
-
-        const restoreEvent = new Event('measurement-state-changed');
-        document.dispatchEvent(restoreEvent);
+        restoreMeasurements(hiddenMeasurementIds);
         
         // Restore the previously active tool (e.g., Brush, Eraser)
         // This ensures drawing tools are functional after AI processing completes
@@ -2073,24 +2079,9 @@ const commandsModule = ({
           .map(e => { return e.label });
       }
 
-      // Store measurements to be hidden and re-enabled after processing
-      const hiddenMeasurementIds: string[] = [];
-      
-      // Hide the measurements during inference
-      for (let i = 0; i < currentMeasurements.length; i++) {
-        const e = currentMeasurements[i];
-        if (e.referenceSeriesUID === currentDisplaySets.SeriesInstanceUID) {
-          hiddenMeasurementIds.push(e.uid);
-          measurementService.toggleVisibilityMeasurement(e.uid, false);
-        }
-      }
-
-      // Force a re-render of the segmentation table after a short delay
-      setTimeout(() => {
-        // This will trigger a re-render of components that depend on measurement state
-        const event = new Event('measurement-state-changed');
-        document.dispatchEvent(event);
-      }, 200);
+      const hiddenMeasurementIds = hideMeasurementsForSeries(
+        currentDisplaySets.SeriesInstanceUID
+      );
 
       let url = `${monaiBasePath}/infer/segmentation?image=${currentDisplaySets.SeriesInstanceUID}&output=dicom_seg`;
       let params = {
@@ -2157,7 +2148,7 @@ const commandsModule = ({
             const label_name = meta.label_name
             const raw = seg
             const new_arrayBuffer = new Uint8Array(raw);
-            let payloadMismatchNotified = false;
+            const payloadMismatchNotifiedRef = { value: false };
 
             let imageIds = currentDisplaySets.imageIds
 
@@ -2207,24 +2198,11 @@ const commandsModule = ({
             derivedImages_new.reverse();
           }
           console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
-          const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
-            ?.getScalarData()?.length || 0);
-          const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
-          const payloadSizeDelta = getPayloadSizeDelta(
-            new_arrayBuffer.length,
-            derivedImages_new.length,
-            firstVoxelsPerSlice,
-            bytesPerVoxel
+          const bytesPerVoxel = getBytesPerVoxelWithWarning(
+            derivedImages_new,
+            new_arrayBuffer,
+            payloadMismatchNotifiedRef
           );
-          if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
-            payloadMismatchNotified = true;
-            uiNotificationService.show({
-              title: 'Segmentation payload warning',
-              message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
-              type: 'warning',
-              duration: 5000,
-            });
-          }
           for (let i = 0; i < derivedImages_new.length; i++) {
             const voxelManager = derivedImages_new[i]
               .voxelManager as csTypes.IVoxelManager<number>;
@@ -2287,24 +2265,11 @@ const commandsModule = ({
               derivedImages_new.reverse();
             }
             console.log(`After reverse: ${(Date.now() - start)/1000} Seconds`);
-            const firstVoxelsPerSlice = ((derivedImages_new[0]?.voxelManager as csTypes.IVoxelManager<number>)
-              ?.getScalarData()?.length || 0);
-            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, derivedImages_new.length, firstVoxelsPerSlice);
-            const payloadSizeDelta = getPayloadSizeDelta(
-              new_arrayBuffer.length,
-              derivedImages_new.length,
-              firstVoxelsPerSlice,
-              bytesPerVoxel
+            const bytesPerVoxel = getBytesPerVoxelWithWarning(
+              derivedImages_new,
+              new_arrayBuffer,
+              payloadMismatchNotifiedRef
             );
-            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
-              payloadMismatchNotified = true;
-              uiNotificationService.show({
-                title: 'Segmentation payload warning',
-                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
-                type: 'warning',
-                duration: 5000,
-              });
-            }
             for (let i = 0; i < derivedImages_new.length; i++) {
               const voxelManager = derivedImages_new[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
@@ -2328,24 +2293,11 @@ const commandsModule = ({
             if(flipped){
               merged_derivedImages.reverse();
             }
-            const firstVoxelsPerSlice = ((merged_derivedImages[0]?.voxelManager as csTypes.IVoxelManager<number>)
-              ?.getScalarData()?.length || 0);
-            const bytesPerVoxel = inferBytesPerVoxel(new_arrayBuffer.length, merged_derivedImages.length, firstVoxelsPerSlice);
-            const payloadSizeDelta = getPayloadSizeDelta(
-              new_arrayBuffer.length,
-              merged_derivedImages.length,
-              firstVoxelsPerSlice,
-              bytesPerVoxel
+            const bytesPerVoxel = getBytesPerVoxelWithWarning(
+              merged_derivedImages,
+              new_arrayBuffer,
+              payloadMismatchNotifiedRef
             );
-            if (payloadSizeDelta !== 0 && !payloadMismatchNotified) {
-              payloadMismatchNotified = true;
-              uiNotificationService.show({
-                title: 'Segmentation payload warning',
-                message: `Payload size mismatch detected (delta ${payloadSizeDelta} bytes). Applying best-effort decode.`,
-                type: 'warning',
-                duration: 5000,
-              });
-            }
             for (let i = 0; i < merged_derivedImages.length; i++) {
               const voxelManager = merged_derivedImages[i]
                 .voxelManager as csTypes.IVoxelManager<number>;
@@ -2419,12 +2371,7 @@ const commandsModule = ({
         throw error;
       } finally {
         // Re-enable measurements to restore legacy tool visibility
-        for (const measurementId of hiddenMeasurementIds) {
-          measurementService.toggleVisibilityMeasurement(measurementId, true);
-        }
-
-        const restoreEvent = new Event('measurement-state-changed');
-        document.dispatchEvent(restoreEvent);
+        restoreMeasurements(hiddenMeasurementIds);
         
         // Restore the previously active tool (e.g., Brush, Eraser)
         // This ensures drawing tools are functional after AI processing completes
