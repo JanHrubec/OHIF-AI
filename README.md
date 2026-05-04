@@ -404,6 +404,29 @@ This section tracks issues found while comparing the porosity branch to main, pl
 
 - Legacy Brush/Eraser/Threshold behavior on AI/baseline segments needs runtime verification after these changes. If tools still appear active but do nothing, inspect labelmap representation state and tool group bindings. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
 
+### Pull request change summary
+
+This PR focuses on aligning AI/baseline workflows with legacy segmentation tools, improving export correctness, and reducing post‑processing duplication.
+
+#### Segmentation flow consistency
+- Reuse active segmentation/segment for baseline and refine flows (prevents blank/extra segmentations). See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+- Segmentation creation/updates now go through `SegmentationService.addOrUpdateSegmentation`, reducing desynchronization risks with tool groups. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+- Baseline respects active segment selection and ensures segmentation labels fallback to a safe value when `SeriesDescription` is empty. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+
+#### Mask seeding + prompt handling
+- Seed Mask toggle now directly controls `use_mask_seed` in SAM requests; `propagateCurrentMask` still forces seeds. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+- Mask seeds are built from the active segment’s labelmap (prompt slices or top non‑empty slices), sent as `seed_masks`, and merged with prompt masks in backend. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts) and [monai-label/monailabel/tasks/infer/basic_infer.py](monai-label/monailabel/tasks/infer/basic_infer.py).
+
+#### Post‑processing simplification
+- Consolidated measurement hide/restore logic and payload size warnings through shared helpers to keep SAM and nnInteractive behavior consistent. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
+
+#### Export correctness
+- DICOM SEG export keeps original `SegmentNumber` to avoid metadata/pixel mismatches. See [Viewers/extensions/cornerstone-dicom-seg/src/commandsModule.ts](Viewers/extensions/cornerstone-dicom-seg/src/commandsModule.ts).
+- DICOM export gating is restored (TIFF still allowed if labelmap exists). See [Viewers/extensions/cornerstone/src/panels/PanelSegmentation.tsx](Viewers/extensions/cornerstone/src/panels/PanelSegmentation.tsx) and [Viewers/extensions/cornerstone/src/customizations/CustomDropdownMenuContent.tsx](Viewers/extensions/cornerstone/src/customizations/CustomDropdownMenuContent.tsx).
+
+#### Defaults + UX
+- Default model restored to `nnInteractive`. See [Viewers/extensions/default/src/stores/toolboxState.ts](Viewers/extensions/default/src/stores/toolboxState.ts).
+
 ---
 
 ## 🤝 Contributing
