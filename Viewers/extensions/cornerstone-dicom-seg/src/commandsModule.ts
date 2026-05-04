@@ -300,13 +300,11 @@ const commandsModule = ({
       const segmentationInOHIF = segmentationService.getSegmentation(segmentationId);
       const representations = segmentationService.getRepresentationsForSegmentation(segmentationId);
 
-      Object.entries(segmentationInOHIF.segments).forEach(([segmentIndex, segment], exportIndex) => {
+      Object.entries(segmentationInOHIF.segments).forEach(([segmentIndex, segment]) => {
         // segmentation service already has a color for each segment
         if (!segment) {
           return;
         }
-
-        const exportedSegmentIndex = exportIndex + 1;
 
         const { label } = segment;
 
@@ -327,7 +325,7 @@ const commandsModule = ({
           .filter(e => e !== undefined && e !== null)
           .find(e => e.SegmentNumber == segmentIndex);
           if (segmentMetadata !== undefined && Object.keys(segmentMetadata).length !== 0){ 
-            segmentMetadata.SegmentNumber = exportedSegmentIndex.toString();
+            segmentMetadata.SegmentNumber = segmentIndex.toString();
             segmentMetadata.SegmentLabel = label;
             segmentMetadata.RecommendedDisplayCIELabValue = RecommendedDisplayCIELabValue;
             segmentMetadata.SegmentAlgorithmType = segmentation.cachedStats.seriesInstanceUid;
@@ -336,7 +334,7 @@ const commandsModule = ({
 
         if (segmentMetadata === undefined || Object.keys(segmentMetadata).length === 0) {
           segmentMetadata = {
-            SegmentNumber: exportedSegmentIndex.toString(),
+            SegmentNumber: segmentIndex.toString(),
             SegmentLabel: label,
             SegmentAlgorithmType: segment?.algorithmType || 'MANUAL',
             SegmentAlgorithmName: segment?.algorithmName || 'OHIF Brush',
@@ -366,7 +364,7 @@ const commandsModule = ({
           segmentMetadata.SegmentAlgorithmType = segmentation.cachedStats.seriesInstanceUid;
         }
         
-        labelmap3D.metadata[exportedSegmentIndex] = segmentMetadata;
+        labelmap3D.metadata[segmentIndex] = segmentMetadata;
       });
 
       const generatedSegmentation = generateSegmentation(

@@ -34,7 +34,8 @@ export const CustomDropdownMenuContent = () => {
   // Try to get segmentation data from expanded context first, fall back to table context
   let segmentation;
   let segmentationId;
-  let allowExport = false;
+  let allowDicomExport = false;
+  let allowTiffExport = false;
 
   try {
     // Try to get from expanded context
@@ -50,8 +51,10 @@ export const CustomDropdownMenuContent = () => {
   // Determine if export is allowed for this segmentation
   if (exportOptions && segmentationId) {
     const exportOption = exportOptions.find(opt => opt.segmentationId === segmentationId);
-    allowExport = exportOption?.isExportable || false;
+    allowDicomExport = exportOption?.isDicomExportable ?? exportOption?.isExportable ?? false;
   }
+
+  allowTiffExport = Boolean(segmentation?.representationData?.Labelmap?.imageIds?.length);
 
   if (!segmentation || !segmentationId) {
     return null;
@@ -119,7 +122,7 @@ export const CustomDropdownMenuContent = () => {
                 e.preventDefault();
                 actions.onSegmentationDownload(segmentationId);
               }}
-              disabled={!allowExport}
+              disabled={!allowDicomExport}
             >
               {t('DICOM SEG')}
             </DropdownMenuItem>
@@ -128,7 +131,7 @@ export const CustomDropdownMenuContent = () => {
                 e.preventDefault();
                 actions.onSegmentationDownloadRTSS(segmentationId);
               }}
-              disabled={!allowExport}
+              disabled={!allowDicomExport}
             >
               {t('DICOM RTSS')}
             </DropdownMenuItem>
@@ -137,7 +140,7 @@ export const CustomDropdownMenuContent = () => {
                 e.preventDefault();
                 actions.onSegmentationDownloadAsAllSlicesTiff(segmentationId);
               }}
-              disabled={!allowExport}
+              disabled={!allowTiffExport}
             >
               {t('TIFF (all slices)')}
             </DropdownMenuItem>
@@ -151,7 +154,7 @@ export const CustomDropdownMenuContent = () => {
                 e.preventDefault();
                 actions.storeSegmentation(segmentationId);
               }}
-              disabled={!allowExport}
+              disabled={!allowDicomExport}
             >
               {t('DICOM SEG')}
             </DropdownMenuItem>

@@ -154,14 +154,12 @@ export default function PanelSegmentation({ children }: withAppTypes) {
   };
 
   // Generate export options
-  // For TIFF exports, we always allow export since it doesn't require DICOM reconstruction.
-  // For DICOM exports, we check isReconstructable
   const exportOptions = segmentationsWithRepresentations.map(({ segmentation }) => {
     const { representationData, segmentationId } = segmentation;
     const { Labelmap } = representationData;
 
     if (!Labelmap) {
-      return { segmentationId, isExportable: true };
+      return { segmentationId, isDicomExportable: false, isExportable: false };
     }
 
     const referencedImageIds = Labelmap.referencedImageIds;
@@ -169,7 +167,7 @@ export default function PanelSegmentation({ children }: withAppTypes) {
     const instance = metaData.get('instance', firstImageId);
 
     if (!instance) {
-      return { segmentationId, isExportable: true }; // Allow TIFF exports even without instance
+      return { segmentationId, isDicomExportable: false, isExportable: false };
     }
 
     const SOPInstanceUID = instance.SOPInstanceUID || instance.SopInstanceUID;
@@ -179,10 +177,11 @@ export default function PanelSegmentation({ children }: withAppTypes) {
       SeriesInstanceUID
     );
 
-    // Always allow export: TIFF doesn't need reconstruction, only DICOM SEG/RTSS need it
+    const isDicomExportable = Boolean(displaySet?.isReconstructable);
     return {
       segmentationId,
-      isExportable: true,
+      isDicomExportable,
+      isExportable: isDicomExportable,
     };
   });
 
