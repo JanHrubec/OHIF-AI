@@ -126,13 +126,41 @@ const commandsModule = ({
     currentImageIdIndex?: number;
     z_range: number[];
   }) {
+    // Ensure the segment exists in the segmentation state (adds color/metadata as needed).
+    if (existing) {
+      const hasSegment = Boolean(existingSegments?.[segmentNumber]);
+      if (!hasSegment) {
+        const fallbackLabel =
+          segments?.[segmentNumber]?.label ||
+          existingSegments?.[segmentNumber]?.label ||
+          `Segment ${segmentNumber}`;
+        servicesManager.services.segmentationService.addSegment(segmentationId, {
+          segmentIndex: segmentNumber,
+          label: fallbackLabel,
+          active: true,
+        });
+      }
+    }
+
     // Get the representations for the segmentation to recover the visibility of the segments
     const representations = servicesManager.services.segmentationService.getSegmentationRepresentations(activeViewportId, { segmentationId });
     
+    const existingSegmentationLabel =
+      activeSegmentation?.config?.label ||
+      (activeSegmentation as any)?.label ||
+      (activeSegmentation as any)?.config?.label;
+    const seriesDescriptionRaw = (currentDisplaySets?.SeriesDescription || '').trim();
+    const isUidLike = /^\d+(?:\.\d+)+$/.test(seriesDescriptionRaw);
+    const seriesDescription = isUidLike ? '' : seriesDescriptionRaw;
     const segmentationLabel =
-      (currentDisplaySets?.SeriesDescription || '').trim() ||
-      currentDisplaySets?.SeriesInstanceUID ||
+      existingSegmentationLabel ||
+      seriesDescription ||
       `Segmentation ${segmentationId.slice(0, 8)}`;
+
+    const referencedVolumeId = currentDisplaySets?.volumeId;
+
+    const currentSegmentation = servicesManager.services.segmentationService.getSegmentation(segmentationId);
+    const updatedSegments = currentSegmentation?.segments || segments;
 
     if (segmentNumber === 1 && Object.keys(existingSegments).length === 0 && !existing) {
       servicesManager.services.segmentationService.addOrUpdateSegmentation({
@@ -141,7 +169,7 @@ const commandsModule = ({
           type: LABELMAP,
           data: {
             imageIds: derivedImageIds,
-            referencedVolumeId: currentDisplaySets.displaySetInstanceUID,
+            ...(referencedVolumeId ? { referencedVolumeId } : {}),
             referencedImageIds: imageIds,
           },
         },
@@ -151,7 +179,7 @@ const commandsModule = ({
             seriesInstanceUid: currentDisplaySets?.SeriesInstanceUID,
           },
           label: segmentationLabel,
-          segments,
+          segments: updatedSegments,
         },
       });
     } else {
@@ -174,7 +202,7 @@ const commandsModule = ({
       // Update the segmentation data, preserving other representation data (but not Surface)
       servicesManager.services.segmentationService.addOrUpdateSegmentation({
         segmentationId,
-        segments: segments,
+        segments: updatedSegments,
         cachedStats: {
           ...(existingSegmentation?.cachedStats || {}),
           seriesInstanceUid: currentDisplaySets?.SeriesInstanceUID,
@@ -184,7 +212,7 @@ const commandsModule = ({
           [LABELMAP]: {
             ...existingLabelmapData, // Preserve existing labelmap data (e.g., volumeId)
             imageIds: derivedImageIds,
-            referencedVolumeId: currentDisplaySets.displaySetInstanceUID,
+            ...(referencedVolumeId ? { referencedVolumeId } : {}),
             referencedImageIds: imageIds,
           },
         },
@@ -244,9 +272,16 @@ const commandsModule = ({
       const viewport = servicesManager.services.cornerstoneViewportService.getCornerstoneViewport(viewportId);
       const isVolume3D = viewport instanceof VolumeViewport3D;
 
-      servicesManager.services.segmentationService.removeSegmentationRepresentations(
+      if (viewportId !== activeViewportId) {
+        continue;
+      }
+
+      const viewportRepresentations = servicesManager.services.segmentationService.getSegmentationRepresentations(
         viewportId,
         { segmentationId }
+      );
+      const hasLabelmapRep = viewportRepresentations?.some(
+        rep => rep.type === csToolsEnums.SegmentationRepresentations.Labelmap
       );
 
       // For VolumeViewport3D, update labelmap image references to trigger surface regeneration
@@ -254,13 +289,29 @@ const commandsModule = ({
         updateLabelmapSegmentationImageReferences(viewportId, segmentationId);
       }
 
-      // For VolumeViewport3D, explicitly specify Labelmap type to trigger viewport conversion to Surface
-      // This ensures the surface is properly computed from the updated labelmap
-      await servicesManager.services.segmentationService.addSegmentationRepresentation(viewportId, {
-        segmentationId: segmentationId,
-        type: isVolume3D ? csToolsEnums.SegmentationRepresentations.Labelmap : undefined,
-      });
+      if (!hasLabelmapRep) {
+        await servicesManager.services.segmentationService.addSegmentationRepresentation(viewportId, {
+          segmentationId: segmentationId,
+          type: csToolsEnums.SegmentationRepresentations.Labelmap,
+        });
+      }
 
+      servicesManager.services.segmentationService.setActiveSegmentation(viewportId, segmentationId);
+
+
+    // Refresh tool group binding for active viewport to ensure labelmap tools can edit.
+    const toolGroup = servicesManager.services.toolGroupService.getToolGroupForViewport(
+      activeViewportId
+    ) as any;
+    const renderingEngine = servicesManager.services.cornerstoneViewportService.getRenderingEngine?.();
+    if (toolGroup && renderingEngine) {
+      try {
+        toolGroup.removeViewports(renderingEngine.id, activeViewportId);
+        toolGroup.addViewport(activeViewportId, renderingEngine.id);
+      } catch (error) {
+        console.warn('Failed to refresh tool group viewport binding', error);
+      }
+    }
       // For VolumeViewport3D, wait a bit for surface computation to complete, then render
       if (isVolume3D) {
         // Give time for surface computation to complete
@@ -273,6 +324,13 @@ const commandsModule = ({
         });
       }
     }
+
+    // Re-assert active segmentation/segment after representations are re-added.
+    servicesManager.services.segmentationService.setActiveSegmentation(
+      activeViewportId,
+      segmentationId
+    );
+    servicesManager.services.segmentationService.setActiveSegment(segmentationId, segmentNumber);
 
     // Trigger SEGMENTATION_DATA_MODIFIED event AFTER all representations are re-added
     // This ensures surface representations exist before they try to update
@@ -1041,7 +1099,18 @@ const commandsModule = ({
       })
     
 
-    const activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId)
+    let activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId)
+    if (!activeSegmentation) {
+      const existingSegmentations = servicesManager.services.segmentationService.getSegmentations();
+      if (existingSegmentations.length > 0) {
+        const fallbackSegmentation = existingSegmentations[0];
+        servicesManager.services.segmentationService.setActiveSegmentation(
+          activeViewportId,
+          fallbackSegmentation.segmentationId
+        );
+        activeSegmentation = fallbackSegmentation;
+      }
+    }
     let segmentNumber = 1;
     let segments: { [segmentIndex: string]: cstTypes.Segment } = {};
     let segmentationId = activeSegmentation?.segmentationId || `${csUtils.uuidv4()}`
@@ -1473,32 +1542,11 @@ const commandsModule = ({
           let segImageIds = [];
 
           let existing = false;
-          // Find existing segmentation with matching seriesInstanceUid
-          if (activeSegmentation !== undefined){
-            let existingseriesInstanceUid = activeSegmentation.cachedStats?.seriesInstanceUid;
-            
-            if (existingseriesInstanceUid === undefined) {
-              const segments = Object.values(activeSegmentation.segments);
-              for (let j = 0; j < segments.length; j++) {
-                const segment = segments[j];
-                if (segment.cachedStats?.algorithmType !== undefined) {
-                  existingseriesInstanceUid = segment.cachedStats.algorithmType;
-                }
-              }
-            }
-            
-            const canForceRefineOnActiveSegmentation = shouldRefineCurrentMask && useMaskSeed;
-            const shouldReuseActiveSegmentation =
-              useBaseline ||
-              shouldRefineCurrentMask ||
-              existingseriesInstanceUid === currentDisplaySets.SeriesInstanceUID ||
-              canForceRefineOnActiveSegmentation;
-            if (shouldReuseActiveSegmentation) {
-              existingSegments = activeSegmentation.segments || {};
-              segmentationId = activeSegmentation.segmentationId;
-              segImageIds = activeSegmentation.representationData.Labelmap.imageIds;
-              existing = true;
-            }
+          if (activeSegmentation !== undefined) {
+            existingSegments = activeSegmentation.segments || {};
+            segmentationId = activeSegmentation.segmentationId;
+            segImageIds = activeSegmentation.representationData?.Labelmap?.imageIds || [];
+            existing = true;
           }
           
           let merged_derivedImages = [];
@@ -1933,7 +1981,18 @@ const commandsModule = ({
         })
       
 
-      const activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId)
+      let activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId)
+      if (!activeSegmentation) {
+        const existingSegmentations = servicesManager.services.segmentationService.getSegmentations();
+        if (existingSegmentations.length > 0) {
+          const fallbackSegmentation = existingSegmentations[0];
+          servicesManager.services.segmentationService.setActiveSegmentation(
+            activeViewportId,
+            fallbackSegmentation.segmentationId
+          );
+          activeSegmentation = fallbackSegmentation;
+        }
+      }
       let segmentNumber = 1;
       let segments: { [segmentIndex: string]: cstTypes.Segment } = {};
       let segmentationId = `${csUtils.uuidv4()}`
@@ -2159,26 +2218,11 @@ const commandsModule = ({
             let segImageIds = [];
 
             let existing = false;
-            // Find existing segmentation with matching seriesInstanceUid
-            if (activeSegmentation !== undefined){
-              let existingseriesInstanceUid = activeSegmentation.cachedStats?.seriesInstanceUid;
-              
-              if (existingseriesInstanceUid === undefined) {
-                const segments = Object.values(activeSegmentation.segments);
-                for (let j = 0; j < segments.length; j++) {
-                  const segment = segments[j];
-                  if (segment.cachedStats?.algorithmType !== undefined) {
-                    existingseriesInstanceUid = segment.cachedStats.algorithmType;
-                  }
-                }
-              }
-              
-              if (existingseriesInstanceUid === currentDisplaySets.SeriesInstanceUID) {
-                existingSegments = activeSegmentation.segments || {};
-                segmentationId = activeSegmentation.segmentationId;
-                segImageIds = activeSegmentation.representationData.Labelmap.imageIds;
-                existing = true;
-              }
+            if (activeSegmentation !== undefined) {
+              existingSegments = activeSegmentation.segments || {};
+              segmentationId = activeSegmentation.segmentationId;
+              segImageIds = activeSegmentation.representationData?.Labelmap?.imageIds || [];
+              existing = true;
             }
 
 
