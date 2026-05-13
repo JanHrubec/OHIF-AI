@@ -26,11 +26,8 @@ By combining these foundation models with the familiar OHIF interface, researche
     - [Model selection & inference](#model-selection)
     - [Text-prompt segmentation](#text-prompt-segmentation)
   - [Report generation](#report-generation)
-- [Keyboard Shortcuts](#%EF%B8%8F-keyboard-shortcuts)
-- [FAQ](#-faq)
-- [How to Cite](#-how-to-cite)
-- [Contributing](#-contributing)
-- [Acknowledgments](#-acknowledgments)
+- [System architecture & segmentation data flow](#-system-architecture--segmentation-data-flow)
+- [Branch development summary & known issues](#-branch-development-summary--known-issues)
 
 ---
 
@@ -236,143 +233,140 @@ Use the Medgemma panel to set Instruction, Query, and slice range, then run infe
 
 ---
 
-## ⌨️ Keyboard Shortcuts
+## 🧭 System architecture & segmentation data flow
 
-For faster workflow, you can use the following keyboard shortcuts:
+This section documents how OHIF-AI stitches the viewer, AI backends, and segmentation tooling together. It is meant as a practical, code-referenced map for debugging and future changes.
 
-**Prompt Types:**
-- `a` - Point
-- `s` - Scribble
-- `d` - Lasso
-- `f` - Bounding box
+### Runtime services and routing
 
-**Mode Controls:**
-- `q` - Toggle Live Mode
-- `w` - Toggle Positive/Negative
-- `e` - Toggle Refine/New
-- `r` - Run inference (if live mode off)
-- `t` - Circulate nnInteractive -> SAM2 -> MedSAM2 -> SAM3
+- **Docker Compose** runs three main services: OHIF web UI, Orthanc PACS, and MONAI Label inference. The entry point is [docker-compose.yml](docker-compose.yml).
+- **Reverse proxy routing** lives in [Viewers/platform/app/.recipes/Nginx-Orthanc/config/nginx.conf](Viewers/platform/app/.recipes/Nginx-Orthanc/config/nginx.conf).
+  - `/monai/*` → `monai_sam2:8002`
+  - `/pacs/*` → Orthanc
+- The UI calls `/monai` and `/pacs` via the browser; the UI chooses `/ohif/monai` when running under `/ohif` base path.
 
-<a href="docs/images/hotkeys.png" target="_blank">
-  <img src="docs/images/hotkeys.png" alt="List of hotkeys" width="700">
-</a>
+### Frontend segmentation flow (prompt → mask → labelmap)
 
-You can view other keyboard shortcuts and customize them in the **Settings** menu (located in the top-right corner). Select **Preferences** to access the hotkey configuration panel.
+- **AI command entrypoint**: [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts)
+  - Collects prompts (points, boxes, scribbles).
+  - Sends multipart requests to `/monai/infer/segmentation`.
+  - Decodes segmentation masks and writes them into labelmap images.
+  - Calls `postSegmentationProcessing()` to update segmentation state and viewports.
+- **Prompt transport**: [Viewers/extensions/monai-label/src/services/MonaiLabelClient.js](Viewers/extensions/monai-label/src/services/MonaiLabelClient.js)
+  - Sends params as multipart `params` (JSON + binary payloads).
+
+### Backend segmentation flow (inference → output)
+
+- **Model orchestration**: [monai-label/monailabel/tasks/infer/basic_infer.py](monai-label/monailabel/tasks/infer/basic_infer.py)
+  - Routes `nnInteractive`, `sam2`, `medsam2`, `sam3`, and baseline thresholding.
+  - Writes masks that the UI ingests as labelmaps.
+- **Capabilities** are served at `/monai/info` from [monai-label/monailabel/interfaces/app.py](monai-label/monailabel/interfaces/app.py) and used to show/hide toolboxes in the UI.
+
+### Segmentation state + editing (Cornerstone)
+
+- **SegmentationService** (Cornerstone integration): [Viewers/extensions/cornerstone/src/services/SegmentationService/SegmentationService.ts](Viewers/extensions/cornerstone/src/services/SegmentationService/SegmentationService.ts)
+  - `createLabelmapForDisplaySet()` creates a labelmap segmentation with derived images.
+  - `addOrUpdateSegmentation()` updates segmentation state and representation data.
+  - `addSegmentationRepresentation()` attaches labelmap rendering to a viewport.
+  - `setActiveSegmentation()` and `setActiveSegment()` determine which segment tools edit.
+- **Tooling/UI**:
+  - `toolboxState` is the single source of truth for AI prompt settings: [Viewers/extensions/default/src/stores/toolboxState.ts](Viewers/extensions/default/src/stores/toolboxState.ts).
+  - The AI tool UI is in [Viewers/extensions/default/src/utils/Toolbox.tsx](Viewers/extensions/default/src/utils/Toolbox.tsx).
+  - AI modes and toolbar buttons are registered in [Viewers/modes/longitudinal/src/index.ts](Viewers/modes/longitudinal/src/index.ts) and [Viewers/modes/longitudinal/src/toolbarButtons.ts](Viewers/modes/longitudinal/src/toolbarButtons.ts).
+
+### Known invariants for segmentation editing
+
+Legacy tools (Brush/Eraser/etc.) depend on **three conditions** being true:
+
+1. A labelmap segmentation exists in Cornerstone state (created via `createLabelmapForDisplaySet()` or a properly formed `addOrUpdateSegmentation()` call).
+2. The labelmap representation for that segmentation is attached to the active viewport.
+3. The active segmentation + segment are set to the target segment (`setActiveSegmentation()` + `setActiveSegment()`).
+
+When any of these is missing or out-of-sync, legacy tools appear enabled but will not modify the segmentation.
 
 ---
 
-## ❓ FAQ
+## 🧾 Branch development summary & known issues
 
-<details>
-<summary><b>Load library (libnvidia-ml.so) failed from NVIDIA Container Toolkit</b></summary>
+This section summarizes **all changes on the porosity branch vs main**, and documents the **current unresolved issues** and **mitigations attempted so far**. It is based on git history, diffs, and the work described in this chat.
 
-**Solution:** Reinstall Docker CE
-```bash
-sudo apt-get install --reinstall docker-ce
-```
-[Reference](https://github.com/NVIDIA/nvidia-container-toolkit/issues/305)
-</details>
+### What changed in this branch (purpose + rationale)
 
-<details>
-<summary><b>Failed to initialize NVML: Unknown Error or "No CUDA available"</b></summary>
+**Deployment & routing**
+- **/ohif-aware routing and proxying**: normalized public base path handling so the UI can run under `/ohif` while still calling MONAI/Orthanc correctly. Touches [docker-compose.yml](docker-compose.yml), [Viewers/platform/app/.recipes/Nginx-Orthanc/config/nginx.conf](Viewers/platform/app/.recipes/Nginx-Orthanc/config/nginx.conf), and [Viewers/platform/app/public/config/docker-nginx-orthanc.js](Viewers/platform/app/public/config/docker-nginx-orthanc.js).
+- **Startup stability**: updated [start.sh](start.sh) to manage clean startup and persistence options; added minor Dockerfile adjustments for image build consistency.
 
-**Solution:** Edit `/etc/nvidia-container-runtime/config.toml` and set:
-```toml
-no-cgroups = false
-```
-[Reference](https://forums.developer.nvidia.com/t/nvida-container-toolkit-failed-to-initialize-nvml-unknown-error/286219/2)
-</details>
+**Backend inference + capabilities**
+- **Baseline segmentation**: added baseline thresholding (otsu/percentile/adaptive) and related parameters in [monai-label/monailabel/tasks/infer/basic_infer.py](monai-label/monailabel/tasks/infer/basic_infer.py).
+- **Prompt/seed handling**: applied seed masks before SAM interactions; added optional current-mask seeding and payload size mismatch warnings.
+- **Capability flags**: exposed VoxTell/MedGemma/baseline availability via [monai-label/monailabel/interfaces/app.py](monai-label/monailabel/interfaces/app.py) for UI gating.
 
----
+**Frontend AI UX + controls**
+- **Porosity toolbox**: added UI controls and settings for baseline tuning, seed masks, and model selection in [Viewers/extensions/default/src/utils/Toolbox.tsx](Viewers/extensions/default/src/utils/Toolbox.tsx) and [Viewers/extensions/default/src/stores/toolboxState.ts](Viewers/extensions/default/src/stores/toolboxState.ts).
+- **Toolbar wiring**: added/updated buttons and mode registration for porosity tooling in [Viewers/modes/longitudinal/src/index.ts](Viewers/modes/longitudinal/src/index.ts) and [Viewers/modes/longitudinal/src/toolbarButtons.ts](Viewers/modes/longitudinal/src/toolbarButtons.ts).
+- **Capability-gated panels**: optional toolboxes only show when `/monai/info` advertises support in [Viewers/extensions/cornerstone/src/getPanelModule.tsx](Viewers/extensions/cornerstone/src/getPanelModule.tsx).
 
-## 📚 How to Cite
+**Segmentation processing + exports**
+- **Labelmap handling + post-processing**: extensive updates in [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts) to reuse active segmentation, stabilize segment indices, manage label/metadata, and refine labelmap representation updates.
+- **TIFF export pipeline**: added valid TIFF export and metadata fixes in [Viewers/extensions/cornerstone-dicom-seg/src/commandsModule.ts](Viewers/extensions/cornerstone-dicom-seg/src/commandsModule.ts), [Viewers/extensions/cornerstone/src/panels/PanelSegmentation.tsx](Viewers/extensions/cornerstone/src/panels/PanelSegmentation.tsx), and [Viewers/extensions/cornerstone/src/customizations/CustomDropdownMenuContent.tsx](Viewers/extensions/cornerstone/src/customizations/CustomDropdownMenuContent.tsx).
 
-If you use OHIF-AI in your research, please cite:
+**Legacy tool support adjustments**
+- **Tool activation + visibility**: multiple changes to restore legacy measurements and re-enable tools after AI runs (e.g., active tool restore, unlocks, segment activation, visibility recovery).
+- **Representation consistency**: forced labelmap representation presence and rebinds to avoid stale viewport bindings after AI updates.
 
-**OHIF-SAM2:**
-```bibtex
-@INPROCEEDINGS{10981119,
-  author={Cho, Jaeyoung and Rastogi, Aditya and Liu, Jingyu and Schlamp, Kai and Vollmuth, Philipp},
-  booktitle={2025 IEEE 22nd International Symposium on Biomedical Imaging (ISBI)}, 
-  title={OHIF -SAM2: Accelerating Radiology Workflows with Meta Segment Anything Model 2}, 
-  year={2025},
-  volume={},
-  number={},
-  pages={1-5},
-  keywords={Image segmentation;Limiting;Grounding;Foundation models;Biological system modeling;Radiology;Biomedical imaging;Web-Based Medical Imaging;Foundation Model;Segmentation;Artificial Intelligence},
-  doi={10.1109/ISBI60581.2025.10981119}
-}
-```
+### Current known issues (as of 13. května 2026)
 
-**nnInteractive:**
-```bibtex
-@misc{isensee2025nninteractiveredefining3dpromptable,
-  title={nnInteractive: Redefining 3D Promptable Segmentation}, 
-  author={Fabian Isensee and Maximilian Rokuss and Lars Krämer and Stefan Dinkelacker and Ashis Ravindran and Florian Stritzke and Benjamin Hamm and Tassilo Wald and Moritz Langenberg and Constantin Ulrich and Jonathan Deissler and Ralf Floca and Klaus Maier-Hein},
-  year={2025},
-  eprint={2503.08373},
-  archivePrefix={arXiv},
-  primaryClass={cs.CV},
-  url={https://arxiv.org/abs/2503.08373}
-}
-```
+1. **Legacy tools do not edit AI/baseline segments**
+  - **Symptom**: Brush/Eraser/Threshold appear active but do not modify the labelmap in segments created or refined by AI/baseline inference.
+  - **Scope**: Occurs even for newly created segments after AI runs; manual segments behave normally.
 
-**SAM2:**
-```bibtex
-@misc{ravi2024sam2segmentimages,
-  title={SAM 2: Segment Anything in Images and Videos}, 
-  author={Nikhila Ravi and Valentin Gabeur and Yuan-Ting Hu and Ronghang Hu and Chaitanya Ryali and Tengyu Ma and Haitham Khedr and Roman Rädle and Chloe Rolland and Laura Gustafson and Eric Mintun and Junting Pan and Kalyan Vasudev Alwala and Nicolas Carion and Chao-Yuan Wu and Ross Girshick and Piotr Dollár and Christoph Feichtenhofer},
-  year={2024},
-  eprint={2408.00714},
-  archivePrefix={arXiv},
-  primaryClass={cs.CV},
-  url={https://arxiv.org/abs/2408.00714}
-}
-```
+2. **Negative prompts are unreliable**
+  - **Symptom**: Negative points/boxes sometimes fail to exclude regions or do not propagate correctly when mixed with other prompt types.
+  - **Scope**: Most visible with SAM variants and when switching between prompt types.
 
-**MedSAM2:**
-```bibtex
-@article{MedSAM2,
-    title={MedSAM2: Segment Anything in 3D Medical Images and Videos},
-    author={Ma, Jun and Yang, Zongxin and Kim, Sumin and Chen, Bihui and Baharoon, Mohammed and Fallahpour, Adibvafa and Asakereh, Reza and Lyu, Hongwei and Wang, Bo},
-    journal={arXiv preprint arXiv:2504.03600},
-    year={2025}
-}
-```
+3. **Seed mask refinement is inconsistent**
+  - **Symptom**: Seed-only or refine-from-mask workflows can yield no-op results or overwrite unintended slices.
+  - **Scope**: Impacts baseline → SAM refinements and long refinement sessions.
 
-**SAM3:**
-```bibtex
-@misc{carion2025sam3segmentconcepts,
-      title={SAM 3: Segment Anything with Concepts}, 
-      author={Nicolas Carion and Laura Gustafson and Yuan-Ting Hu and Shoubhik Debnath and Ronghang Hu and Didac Suris and Chaitanya Ryali and Kalyan Vasudev Alwala and Haitham Khedr and Andrew Huang and Jie Lei and Tengyu Ma and Baishan Guo and Arpit Kalla and Markus Marks and Joseph Greer and Meng Wang and Peize Sun and Roman Rädle and Triantafyllos Afouras and Effrosyni Mavroudi and Katherine Xu and Tsung-Han Wu and Yu Zhou and Liliane Momeni and Rishi Hazra and Shuangrui Ding and Sagar Vaze and Francois Porcher and Feng Li and Siyuan Li and Aishwarya Kamath and Ho Kei Cheng and Piotr Dollár and Nikhila Ravi and Kate Saenko and Pengchuan Zhang and Christoph Feichtenhofer},
-      year={2025},
-      eprint={2511.16719},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2511.16719}, 
-}
-```
+4. **Other prompt types (scribble/lasso) remain fragile**
+  - **Symptom**: Prompt conversions can be rejected or produce unexpected masks; some prompt types are intentionally disabled for SAM models, but UX is still confusing.
 
-**VoxTell:**
-```bibtex
-@misc{rokuss2025voxtell,
-  title={VoxTell: Free-Text Promptable Universal 3D Medical Image Segmentation}, 
-  author={Maximilian Rokuss and Moritz Langenberg and Yannick Kirchhoff and Fabian Isensee and Benjamin Hamm and Constantin Ulrich and Sebastian Regnery and Lukas Bauer and Efthimios Katsigiannopulos and Tobias Norajitra and Klaus Maier-Hein},
-  year={2025},
-  eprint={2511.11450},
-  archivePrefix={arXiv},
-  primaryClass={cs.CV},
-  url={https://arxiv.org/abs/2511.11450}
-}
-```
+### Remediations attempted so far (complete list)
 
-**Papers:**
-- [OHIF-SAM2 (IEEE ISBI 2025)](https://ieeexplore.ieee.org/document/10981119)
-- [nnInteractive (arXiv)](https://arxiv.org/abs/2503.08373)
-- [SAM2 (arXiv)](https://arxiv.org/abs/2408.00714)
-- [MedSAM2 (arXiv)](https://arxiv.org/abs/2504.03600)
-- [SAM3 (arXiv)](https://arxiv.org/abs/2511.16719)
-- [VoxTell (arXiv)](https://arxiv.org/abs/2511.11450)
+**Segmentation state + representation fixes**
+- Reused the **active segmentation** instead of always creating new ones.
+- Ensured **active segmentation + segment** are reasserted after AI runs.
+- Added **segment creation** if the target segment was missing in the segmentation state.
+- Enforced **labelmap representation** for AI-generated masks, and reattached it to the active viewport.
+- Removed stale labelmap representations and re-added them when labelmap references changed.
+- Updated labelmap **representation data** (imageIds, referencedImageIds) for existing segmentations, not only for new ones.
+- Refreshed labelmap image references after AI updates to keep stack viewports editable.
+- Rebound tool groups to active viewports to avoid stale tool-to-viewport binding.
+
+**Tool visibility + state restores**
+- Restored **legacy measurements** after AI runs.
+- Restored the **previous active tool** (e.g., Brush/Eraser) after inference completes.
+- Unlocked AI tooling after commands complete to avoid hidden locks.
+
+**Prompt handling + backend alignment**
+- Added **negative prompt masking** support in SAM and blocked unsupported prompt conversions.
+- Added **seed-mask handling** before SAM prompt processing in the backend.
+- Added **baseline controls** (threshold method, sigma, percentile, local block sizes) with UI hints and safer defaults.
+- Hardened **mask payload decoding** and flip-order handling to reduce silent corruption.
+
+**Exports + metadata correctness**
+- Ensured TIFF exports write valid tags and preserve segment indices.
+- Updated SEG export logic to avoid metadata/segment index mismatch.
+
+### Why legacy tools are still failing (working hypothesis)
+
+The segmentation state appears valid in UI, but legacy tools likely bind to **stale labelmap references** or **representation state** after AI writes masks directly into derived labelmap images. The most likely failure points are:
+
+- **Representation imageIds** not matching the updated derived labelmap images after inference.
+- **Viewport representation bindings** not fully refreshed after in-place labelmap updates.
+- **Segment active state** desynchronized from the segmentation state used by tools.
+
+These hypotheses match the symptom where segmentation renders correctly but tools do not modify the labelmap.
 
 ---
 
@@ -399,10 +393,6 @@ This section tracks issues found while comparing the porosity branch to main, pl
 
 5. **Fix export correctness**: keep TIFF exports always available but gate DICOM SEG exports on reconstructability; if segment indices are renumbered, remap pixel values to match metadata or retain original indices. **Status: Done**.
 6. **Explicit defaults and UX**: confirm whether `medsam2` should be the default model and document the rationale; otherwise revert to the previous default or make it user-configurable. **Status: Done (reverted to nnInteractive)**.
-
-### Warnings
-
-- Legacy Brush/Eraser/Threshold behavior on AI/baseline segments needs runtime verification after these changes. If tools still appear active but do nothing, inspect labelmap representation state and tool group bindings. See [Viewers/extensions/default/src/commandsModule.ts](Viewers/extensions/default/src/commandsModule.ts).
 
 ### Pull request change summary
 
@@ -455,25 +445,3 @@ Each entry lists the change, its purpose, and whether it is correct and necessar
 - [monai-label/monailabel/interfaces/app.py](monai-label/monailabel/interfaces/app.py): expose `capabilities` in `/monai/info` using env flags. Purpose: frontend can hide unsupported tools. **Correct: yes. Necessary: yes for capability gating.**
 - [monai-label/monailabel/tasks/infer/basic_infer.py](monai-label/monailabel/tasks/infer/basic_infer.py): baseline porosity pipeline; optional VoxTell/MedGemma; additional prompt types; mask seeding; improved slice order handling; safety checks. Purpose: implement baseline + richer prompts while keeping SAM stable. **Correct: yes. Necessary: yes for backend features.**
 - [start.sh](start.sh): structured startup with caching, persistent storage prep, selective builds, and safe defaults. Purpose: reproducible startup without unnecessary rebuilds. **Correct: yes. Necessary: yes for consistent dev workflow.**
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
-
----
-
-## 🙏 Acknowledgments
-
-This project builds upon:
-- [OHIF Viewer](https://ohif.org/) - Open Health Imaging Foundation Viewer
-- [SAM2](https://github.com/facebookresearch/sam2) - Segment Anything Model 2 by Meta
-- [nnInteractive](https://github.com/MIC-DKFZ/nnInteractive) - Interactive 3D Segmentation Framework
-- [MedSAM2](https://github.com/bowang-lab/MedSAM2) - MedSAM2 by Bowang lab
-- [SAM3](https://github.com/facebookresearch/sam3) - Segment Anything Model 3 by Meta
-- [VoxTell](https://github.com/MIC-DKFZ/VoxTell) - Free-Text Promptable Universal 3D Medical Image Segmentation
-- [MedGemma](https://github.com/Google-Health/medgemma) - Report generation from 3D medical images ([Google Research Blog](https://research.google/blog/next-generation-medical-image-interpretation-with-medgemma-15-and-medical-speech-to-text-with-medasr/))
-
-
-

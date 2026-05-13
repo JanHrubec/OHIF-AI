@@ -21,6 +21,7 @@ import promptSaveReport from './utils/promptSaveReport';
 
 import { Enums as csToolsEnums, Types as cstTypes } from '@cornerstonejs/tools';
 import { updateLabelmapSegmentationImageReferences } from '@cornerstonejs/tools/segmentation/updateLabelmapSegmentationImageReferences';
+import { getLabelmapImageIds } from '@cornerstonejs/tools/segmentation';
 import { cache, imageLoader, metaData, Types as csTypes, utilities as csUtils, VolumeViewport3D, eventTarget } from '@cornerstonejs/core';
 import { adaptersSEG } from '@cornerstonejs/adapters';
 const LABELMAP = csToolsEnums.SegmentationRepresentations.Labelmap;
@@ -99,6 +100,41 @@ const commandsModule = ({
    * Helper function to handle post-segmentation processing after segmentation data is created/updated.
    * This includes updating representations, handling viewports, and triggering events.
    */
+  const getSegmentationLabel = (
+    displaySet: any,
+    segmentationId: string,
+    activeSegmentation?: any
+  ) => {
+    const existingSegmentationLabel =
+      activeSegmentation?.config?.label ||
+      (activeSegmentation as any)?.label ||
+      (activeSegmentation as any)?.config?.label;
+    const seriesDescriptionRaw = (displaySet?.SeriesDescription || '').trim();
+    const isUidLike = /^\d+(?:\.\d+)+$/.test(seriesDescriptionRaw);
+    const seriesDescription = isUidLike ? '' : seriesDescriptionRaw;
+    return (
+      existingSegmentationLabel ||
+      seriesDescription ||
+      `Segmentation ${segmentationId.slice(0, 8)}`
+    );
+  };
+
+  const getSegmentationLabelmapImageIds = (
+    segmentationId: string,
+    segmentation?: any
+  ): string[] => {
+    try {
+      const labelmapImageIds = getLabelmapImageIds(segmentationId);
+      if (labelmapImageIds?.length) {
+        return labelmapImageIds;
+      }
+    } catch (error) {
+      console.warn('Failed to read labelmap image ids', error);
+    }
+
+    return segmentation?.representationData?.[LABELMAP]?.imageIds || [];
+  };
+
   async function postSegmentationProcessing({
     activeViewportId,
     segmentationId,
@@ -145,24 +181,22 @@ const commandsModule = ({
     // Get the representations for the segmentation to recover the visibility of the segments
     const representations = servicesManager.services.segmentationService.getSegmentationRepresentations(activeViewportId, { segmentationId });
     
-    const existingSegmentationLabel =
-      activeSegmentation?.config?.label ||
-      (activeSegmentation as any)?.label ||
-      (activeSegmentation as any)?.config?.label;
-    const seriesDescriptionRaw = (currentDisplaySets?.SeriesDescription || '').trim();
-    const isUidLike = /^\d+(?:\.\d+)+$/.test(seriesDescriptionRaw);
-    const seriesDescription = isUidLike ? '' : seriesDescriptionRaw;
-    const segmentationLabel =
-      existingSegmentationLabel ||
-      seriesDescription ||
-      `Segmentation ${segmentationId.slice(0, 8)}`;
+    const segmentationLabel = getSegmentationLabel(
+      currentDisplaySets,
+      segmentationId,
+      activeSegmentation
+    );
 
     const referencedVolumeId = currentDisplaySets?.volumeId;
 
     const currentSegmentation = servicesManager.services.segmentationService.getSegmentation(segmentationId);
     const updatedSegments = currentSegmentation?.segments || segments;
 
-    if (segmentNumber === 1 && Object.keys(existingSegments).length === 0 && !existing) {
+    const readableText = customizationService.getCustomization('panelSegmentation.readableText');
+
+    // Get existing segmentation to preserve other representation data
+    const existingSegmentation = servicesManager.services.segmentationService.getSegmentation(segmentationId);
+    if (!existingSegmentation) {
       servicesManager.services.segmentationService.addOrUpdateSegmentation({
         segmentationId,
         representation: {
@@ -183,13 +217,9 @@ const commandsModule = ({
         },
       });
     } else {
-      const readableText = customizationService.getCustomization('panelSegmentation.readableText');
-
-      // Get existing segmentation to preserve other representation data
-      const existingSegmentation = servicesManager.services.segmentationService.getSegmentation(segmentationId);
       const existingRepresentationData = existingSegmentation?.representationData || {};
       const existingLabelmapData = existingRepresentationData[LABELMAP] || {};
-      
+
       // For Surface representation, remove it entirely to force regeneration from updated labelmap
       // This ensures surfaces are recomputed from the new labelmap data
       const updatedRepresentationData = { ...existingRepresentationData };
@@ -198,7 +228,7 @@ const commandsModule = ({
         // Remove Surface representation data to force regeneration from updated labelmap
         delete updatedRepresentationData[SURFACE];
       }
-      
+
       // Update the segmentation data, preserving other representation data (but not Surface)
       servicesManager.services.segmentationService.addOrUpdateSegmentation({
         segmentationId,
@@ -206,6 +236,15 @@ const commandsModule = ({
         cachedStats: {
           ...(existingSegmentation?.cachedStats || {}),
           seriesInstanceUid: currentDisplaySets?.SeriesInstanceUID,
+        },
+        representation: {
+          type: LABELMAP,
+          data: {
+            ...existingLabelmapData,
+            imageIds: derivedImageIds,
+            ...(referencedVolumeId ? { referencedVolumeId } : {}),
+            referencedImageIds: imageIds,
+          },
         },
         representationData: {
           ...updatedRepresentationData, // Surface data removed to force regeneration
@@ -217,18 +256,20 @@ const commandsModule = ({
           },
         },
       });
-      
-      // Update the segmentation stats
-      Promise.resolve().then(() => 
+    }
+
+    // Update the segmentation stats
+    Promise.resolve()
+      .then(() =>
         updateSegmentationStats({
           segmentation: activeSegmentation,
           segmentationId,
           readableText,
         })
-      ).catch(error => {
+      )
+      .catch(error => {
         console.warn('Failed to update segmentation stats:', error);
       });
-    }
     
     servicesManager.services.segmentationService.setActiveSegment(segmentationId, segmentNumber);
     servicesManager.services.segmentationService.setActiveSegmentation(activeViewportId, segmentationId);
@@ -284,12 +325,17 @@ const commandsModule = ({
         rep => rep.type === csToolsEnums.SegmentationRepresentations.Labelmap
       );
 
-      // For VolumeViewport3D, update labelmap image references to trigger surface regeneration
-      if (isVolume3D) {
-        updateLabelmapSegmentationImageReferences(viewportId, segmentationId);
-      }
+      // Refresh labelmap references for both stack and volume viewports.
+      const didUpdateLabelmapRefs = updateLabelmapSegmentationImageReferences(
+        viewportId,
+        segmentationId
+      );
 
-      if (!hasLabelmapRep) {
+      if (!hasLabelmapRep || didUpdateLabelmapRefs) {
+        servicesManager.services.segmentationService.removeSegmentationRepresentations(viewportId, {
+          segmentationId: segmentationId,
+          type: csToolsEnums.SegmentationRepresentations.Labelmap,
+        });
         await servicesManager.services.segmentationService.addSegmentationRepresentation(viewportId, {
           segmentationId: segmentationId,
           type: csToolsEnums.SegmentationRepresentations.Labelmap,
@@ -1099,6 +1145,7 @@ const commandsModule = ({
       })
     
 
+    let segmentationId = `${csUtils.uuidv4()}`
     let activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId)
     if (!activeSegmentation) {
       const existingSegmentations = servicesManager.services.segmentationService.getSegmentations();
@@ -1109,11 +1156,32 @@ const commandsModule = ({
           fallbackSegmentation.segmentationId
         );
         activeSegmentation = fallbackSegmentation;
+        segmentationId = fallbackSegmentation.segmentationId;
+      } else {
+        const label = getSegmentationLabel(currentDisplaySets, segmentationId);
+        const createdSegmentationId = await servicesManager.services.segmentationService.createLabelmapForDisplaySet(
+          currentDisplaySets,
+          {
+            segmentationId,
+            label,
+            segments: {},
+          }
+        );
+        await servicesManager.services.segmentationService.addSegmentationRepresentation(activeViewportId, {
+          segmentationId: createdSegmentationId,
+          type: LABELMAP,
+        });
+        servicesManager.services.segmentationService.setActiveSegmentation(
+          activeViewportId,
+          createdSegmentationId
+        );
+        activeSegmentation = servicesManager.services.segmentationService.getSegmentation(createdSegmentationId);
+        segmentationId = createdSegmentationId;
       }
     }
     let segmentNumber = 1;
     let segments: { [segmentIndex: string]: cstTypes.Segment } = {};
-    let segmentationId = activeSegmentation?.segmentationId || `${csUtils.uuidv4()}`
+    segmentationId = activeSegmentation?.segmentationId || segmentationId;
 
     if (useBaseline && toolboxState.getRefineNew()) {
       toolboxState.setRefineNew(false);
@@ -1313,7 +1381,10 @@ const commandsModule = ({
         collectPromptPolylineSlices(neg_scribbles as any[]);
 
         const labelmapImageIds =
-          activeSegmentation?.representationData?.Labelmap?.imageIds || [];
+          getSegmentationLabelmapImageIds(
+            activeSegmentation.segmentationId,
+            activeSegmentation
+          ) || [];
 
         if (labelmapImageIds.length === 0) {
           uiNotificationService.show({
@@ -1545,7 +1616,10 @@ const commandsModule = ({
           if (activeSegmentation !== undefined) {
             existingSegments = activeSegmentation.segments || {};
             segmentationId = activeSegmentation.segmentationId;
-            segImageIds = activeSegmentation.representationData?.Labelmap?.imageIds || [];
+            segImageIds = getSegmentationLabelmapImageIds(
+              activeSegmentation.segmentationId,
+              activeSegmentation
+            ) || [];
             existing = true;
           }
           
@@ -1981,6 +2055,7 @@ const commandsModule = ({
         })
       
 
+      let segmentationId = `${csUtils.uuidv4()}`
       let activeSegmentation = servicesManager.services.segmentationService.getActiveSegmentation(activeViewportId)
       if (!activeSegmentation) {
         const existingSegmentations = servicesManager.services.segmentationService.getSegmentations();
@@ -1991,13 +2066,34 @@ const commandsModule = ({
             fallbackSegmentation.segmentationId
           );
           activeSegmentation = fallbackSegmentation;
+          segmentationId = fallbackSegmentation.segmentationId;
+        } else {
+          const label = getSegmentationLabel(currentDisplaySets, segmentationId);
+          const createdSegmentationId = await servicesManager.services.segmentationService.createLabelmapForDisplaySet(
+            currentDisplaySets,
+            {
+              segmentationId,
+              label,
+              segments: {},
+            }
+          );
+          await servicesManager.services.segmentationService.addSegmentationRepresentation(activeViewportId, {
+            segmentationId: createdSegmentationId,
+            type: LABELMAP,
+          });
+          servicesManager.services.segmentationService.setActiveSegmentation(
+            activeViewportId,
+            createdSegmentationId
+          );
+          activeSegmentation = servicesManager.services.segmentationService.getSegmentation(createdSegmentationId);
+          segmentationId = createdSegmentationId;
         }
       }
       let segmentNumber = 1;
       let segments: { [segmentIndex: string]: cstTypes.Segment } = {};
-      let segmentationId = `${csUtils.uuidv4()}`
+      segmentationId = activeSegmentation?.segmentationId || segmentationId;
       if (activeSegmentation !== undefined){
-        segments = activeSegmentation.segments;
+        segments = activeSegmentation.segments || {};
       if (Object.values(segments).length > 0) {
         // Find the minimum available segment number
         const existingSegmentNumbers = Object.values(segments).map(e => e.segmentIndex).sort((a, b) => a - b);
@@ -2221,7 +2317,10 @@ const commandsModule = ({
             if (activeSegmentation !== undefined) {
               existingSegments = activeSegmentation.segments || {};
               segmentationId = activeSegmentation.segmentationId;
-              segImageIds = activeSegmentation.representationData?.Labelmap?.imageIds || [];
+              segImageIds = getSegmentationLabelmapImageIds(
+                activeSegmentation.segmentationId,
+                activeSegmentation
+              ) || [];
               existing = true;
             }
 
