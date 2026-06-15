@@ -542,6 +542,7 @@ class BasicInferTask(InferTask):
             local_offset = float(data.get("baseline_local_offset", 0.02))
             connectivity = int(data.get("baseline_connectivity", 3))
             connectivity = max(1, min(3, connectivity))
+            border_min_fraction = float(data.get("baseline_border_min_fraction", 0.1))
 
             img_np = sitk.GetArrayFromImage(img).astype(np.float32)
 
@@ -596,10 +597,30 @@ class BasicInferTask(InferTask):
 
             output = np.ones(normed.shape, dtype=np.uint8)
             if n_components > 0:
-                component_sizes = ndimage.sum(dark_mask, labelled, range(1, n_components + 1))
-                bg_label = np.argmax(component_sizes) + 1
-                output[labelled == bg_label] = 0
-                porosity_mask = dark_mask & (labelled != bg_label)
+                border_labels = np.concatenate(
+                    [
+                        labelled[0, :, :].ravel(),
+                        labelled[-1, :, :].ravel(),
+                        labelled[:, 0, :].ravel(),
+                        labelled[:, -1, :].ravel(),
+                        labelled[:, :, 0].ravel(),
+                        labelled[:, :, -1].ravel(),
+                    ]
+                )
+                border_labels = np.unique(border_labels)
+                border_labels = border_labels[border_labels > 0]
+
+                component_sizes = np.bincount(labelled.ravel())
+                total_dark_voxels = component_sizes[1:].sum()
+                if total_dark_voxels > 0 and len(border_labels) > 0:
+                    border_fractions = component_sizes[border_labels] / total_dark_voxels
+                    bg_labels = border_labels[border_fractions >= border_min_fraction]
+                else:
+                    bg_labels = np.array([], dtype=border_labels.dtype)
+
+                background_mask = np.isin(labelled, bg_labels)
+                output[background_mask] = 0
+                porosity_mask = dark_mask & (~background_mask)
                 output[porosity_mask] = 2
 
             pred = (output == 2).astype(np.uint8)
@@ -614,6 +635,7 @@ class BasicInferTask(InferTask):
                 "baseline_local_block_size": local_block_size,
                 "baseline_local_offset": local_offset,
                 "baseline_connectivity": connectivity,
+                "baseline_border_min_fraction": border_min_fraction,
             }
             final_result_json["sam_elapsed"] = elapsed
 
